@@ -1,0 +1,91 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>AGÊNCIA VIELA VICE — Sistema 6 Estrelas</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100vw; height: 100vh; overflow: hidden; background: #090d16; color: #fff; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; }
+  #top { height: 58px; flex-shrink: 0; background: #111625; border-bottom: 1px solid #263044; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; z-index: 10; }
+  .title { font-size: 16px; font-weight: 800; }
+  .sub { font-size: 11px; color: #fbbf24; font-weight: 600; }
+  .metrics { display: flex; gap: 60px; text-align: center; font-size: 12px; }
+  .metrics b { display: block; font-size: 14px; margin-top: 2px; }
+  .btn-top { background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 7px 16px; font-weight: 700; cursor: pointer; }
+  #stage { position: relative; flex: 1; width: 100%; height: calc(100vh - 58px); background: url('/escritorio_img') center/100% 100% no-repeat; overflow: hidden; }
+  .box { position: absolute; background: rgba(13, 18, 30, 0.90); border: 1px solid #334155; border-radius: 8px; padding: 10px; font-size: 11px; box-shadow: 0 6px 18px rgba(0,0,0,0.6); z-index: 15; }
+  .station { position: absolute; display: flex; flex-direction: column; align-items: center; z-index: 12; pointer-events: none; }
+  .bubble { background: rgba(13, 18, 30, 0.88); border: 1px solid #475569; border-radius: 6px; padding: 5px 9px; font-size: 10px; max-width: 175px; line-height: 1.25; box-shadow: 0 4px 12px rgba(0,0,0,0.7); margin-bottom: 3px; }
+  .sprite { height: 88px; width: auto; image-rendering: pixelated; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.85)); animation: respirar 2.4s ease-in-out infinite; }
+  @keyframes respirar { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-2px); } }
+  #dock { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); width: max-content; background: rgba(13, 18, 30, 0.94); border: 1px solid #334155; border-radius: 14px; padding: 8px 14px; display: flex; justify-content: center; gap: 10px; z-index: 90; }
+  .btn { background: #1d4ed8; color: #fff; border: none; border-radius: 8px; padding: 8px 14px; font-size: 11px; font-weight: 700; cursor: pointer; min-width: 88px; line-height: 1.2; }
+  .btn:hover { filter: brightness(1.15); }
+  .btn-red { background: #dc2626; }
+  #modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.84); align-items: center; justify-content: center; z-index: 99; }
+  #modal-in { background: #0f172a; border: 2px solid #3b82f6; border-radius: 12px; width: 85%; max-width: 720px; max-height: 88vh; overflow-y: auto; padding: 20px; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  select, input, textarea { width: 100%; background: #090d16; color: #fff; border: 1px solid #475569; border-radius: 6px; padding: 8px; margin-top: 6px; font-family: inherit; font-size: 12px; }
+  .row-btns { display: flex; gap: 10px; margin-top: 14px; }
+  .act-btn { flex: 1; border: none; border-radius: 6px; padding: 10px; font-weight: 700; color: #fff; cursor: pointer; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="top">
+  <div><div class="title">AGÊNCIA VIELA VICE</div><div class="sub">★ Curadoria &amp; Controle de Qualidade</div></div>
+  <div class="metrics">
+    <div>Estoque Fila (0-60)<b style="color:#fbbf24" id="m-est">0</b></div>
+    <div>Envios de Hoje<b style="color:#34d399" id="m-env">0/42</b></div>
+    <div>Faturamento Est.<b id="m-fat">R$ 1240.0</b></div>
+  </div>
+  <button class="btn-top" onclick="abrirReuniao()">Reunião</button>
+</div>
+
+<div id="stage">
+  <div class="box" style="top:14px; left:16px; width:245px;">
+    <div style="display:flex; justify-content:space-between; color:#facc15; font-weight:700;"><span>⚡ Estoque de Gordura (0-60)</span><span id="g-pct">0%</span></div>
+    <div id="g-msg" style="color:#cbd5e1; font-size:10px; margin-top:4px;">Varredura ativa e gerando estoque...</div>
+  </div>
+
+  <div class="box" style="top:82px; left:16px; width:245px;">
+    <div style="display:flex; justify-content:space-between; font-size:10px; color:#94a3b8; border-bottom:1px solid #1e293b; padding-bottom:5px; margin-bottom:6px;">
+      <span>&gt;_ Console de Qualidade &amp; T.I.</span><span style="color:#22c55e; font-weight:700;">● ONLINE</span>
+    </div>
+    <div id="logs" style="font-family:monospace; font-size:9.5px; color:#93c5fd; line-height:1.4; max-height:155px; overflow-y:auto;">
+      <div>Sistema iniciado com sucesso. Rede de 7 canais auditada.</div>
+    </div>
+  </div>
+
+  <div class="station" style="top: 14%; right: 10%;"><div class="bubble"><b>Diretoria:</b> Curadoria de excelência ativa.</div><img class="sprite" src="/sprites/linha1_pose1.png"></div>
+  <div class="station" style="top: 41%; left: 32%;"><div class="bubble"><b>Mariana:</b> Revisando roteiro de GTA RP.</div><img class="sprite" src="/sprites/linha4_pose1.png"></div>
+  <div class="station" style="top: 42%; left: 41%;"><div class="bubble"><b>Dr. Ricardo:</b> Validação de áudio e ganchos.</div><img class="sprite" src="/sprites/linha2_pose1.png"></div>
+  <div class="station" style="top: 43%; left: 50%;"><div class="bubble"><b>Camila:</b> Filtrando legendas e cortes 4K.</div><img class="sprite" src="/sprites/linha3_pose1.png"></div>
+  <div class="station" style="top: 56%; left: 26%;"><div class="bubble"><b>Bruno:</b> Checando integridade de trailers.</div><img class="sprite" src="/sprites/linha5_pose1.png"></div>
+  <div class="station" style="top: 63%; left: 10%;"><div class="bubble"><b>Lucas:</b> Sincronismo perfeito de legendas.</div><img class="sprite" src="/sprites/linha1_pose2.png"></div>
+  <div class="station" style="top: 56%; left: 57%;"><div class="bubble"><b>Caio:</b> Envio seguro para canais autorizados.</div><img class="sprite" src="/sprites/linha3_pose2.png"></div>
+  <div class="station" style="top: 62%; left: 65%;"><div class="bubble"><b>Beatriz:</b> Auditoria de retenção e CTR.</div><img class="sprite" src="/sprites/linha2_pose2.png"></div>
+
+  <div id="dock">
+    <button class="btn" id="b-dir" onclick="abrirAvaliacao()">Diretoria<br>(0)</button>
+    <button class="btn" onclick="abrirCuradoriaTop()">Curadoria<br>Top</button>
+    <button class="btn" id="b-fila" onclick="abrirFila()">Fila YouTube<br>(0)</button>
+    <button class="btn" onclick="abrirNivel()">★ Nível 6<br>Estrelas</button>
+    <button class="btn" onclick="abrirSuporteTI()">Suporte<br>T.I.</button>
+    <button class="btn btn-red" id="b-var" onclick="toggleVarredura()">Stop<br>Varredura</button>
+    <button class="btn" onclick="atualizarTudo()">Atualizar</button>
+  </div>
+</div>
+
+<div id="modal" onclick="if(event.target===this)fecharModal()">
+  <div id="modal-in">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #1e293b; padding-bottom:8px;">
+      <h3 id="m-tit"></h3>
+      <button onclick="fecharModal()" style="background:#ef4444; color:#fff; border:none; padding:5px 12px; border-radius:6px; font-weight:700; cursor:pointer;">Fechar</button>
+    </div>
+    <div id="m-txt" style="font-size:13px; line-height:1.5;"></div>
+  </div>
+</div>
+
+<script src="/painel.js"></script>
+</body>
+</html>

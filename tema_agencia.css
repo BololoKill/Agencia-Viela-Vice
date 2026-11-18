@@ -1,0 +1,52 @@
+﻿
+/* TEMA GTA 6 VICE CITY - APLICACAO REAL NA IMAGEM E PAINEIS */
+html, body {
+    background: linear-gradient(135deg, #120321 0%, #3a0ca3 45%, #b5179e 80%, #f72585 100%) !important;
+}
+[style*="escritorio_img"] {
+    position: relative !important;
+    box-shadow: 0 0 35px #00f0ff, inset 0 0 80px rgba(247, 37, 133, 0.75) !important;
+    border: 3px solid #00f0ff !important;
+    border-radius: 16px !important;
+}
+[style*="escritorio_img"]::after {
+    content: "VICE CITY • GTA 6 EDITION";
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(18, 3, 33, 0.88);
+    color: #00f0ff;
+    border: 1.5px solid #f72585;
+    box-shadow: 0 0 15px #f72585;
+    padding: 4px 16px;
+    border-radius: 20px;
+    font-weight: bold;
+    font-size: 13px;
+    letter-spacing: 2px;
+    z-index: 20;
+    pointer-events: none;
+}
+[style*="escritorio_img"]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(114, 9, 183, 0.48), rgba(247, 37, 133, 0.35), rgba(0, 240, 255, 0.25));
+    mix-blend-mode: multiply;
+    pointer-events: none;
+    border-radius: 13px;
+    z-index: 2;
+}
+#camada-agentes {
+    z-index: 10 !important;
+}
+header, footer, .top-bar, .bottom-bar, [id*="hud"], [id*="terminal"] {
+    background: rgba(18, 3, 33, 0.92) !important;
+    border-color: #f72585 !important;
+    box-shadow: 0 0 20px rgba(247, 37, 133, 0.45) !important;
+}
+button {
+    border: 1.5px solid #00f0ff !important;
+    box-shadow: 0 0 12px rgba(247, 37, 133, 0.4) !important;
+}
+

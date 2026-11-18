@@ -1,0 +1,26 @@
+{
+  "atualizado_em": "16/11/2026 08:54",
+  "total_fila_24": 3,
+  "bugs_bloqueados": 0,
+  "top6_gerencia": [
+    {
+      "arquivo": "short-davyjonesgameplayrj-parte1.mp4",
+      "caminho": "exportacao\\short-davyjonesgameplayrj-parte1.mp4",
+      "nota": 98,
+      "tipo": "longo"
+    },
+    {
+      "arquivo": "short-davyjonesgameplayrj-parte2.mp4",
+      "caminho": "exportacao\\short-davyjonesgameplayrj-parte2.mp4",
+      "nota": 98,
+      "tipo": "longo"
+    },
+    {
+      "arquivo": "short-davyjonesgameplayrj-parte3.mp4",
+      "caminho": "exportacao\\short-davyjonesgameplayrj-parte3.mp4",
+      "nota": 98,
+      "tipo": "longo"
+    }
+  ],
+  "pauta_reuniao": "Curadoria auditou 3 videos, bloqueou 0 com bugs e ranqueou o Top 3 do dia para o Gerente."
+}

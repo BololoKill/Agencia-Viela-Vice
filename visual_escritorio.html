@@ -1,0 +1,305 @@
+﻿<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Agência Viela Vice — Escritório Virtual</title>
+<style>
+  body {
+    background: url('/sprites/escritorio_vice.png') no-repeat center center fixed;
+    background-size: cover;
+    color: #fff;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    overflow-x: hidden;
+  }
+  .escritorio-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+  }
+  .agente-dr-ricardo { position: absolute; top: 25%; left: 35%; }
+  .agente-camila { position: absolute; top: 40%; left: 55%; }
+  .agente-bruno { position: absolute; top: 20%; left: 50%; }
+  .agente-lucas { position: absolute; top: 65%; left: 70%; }
+  .agente-mariana { position: absolute; top: 60%; left: 30%; }
+  .agente-caio { position: absolute; top: 50%; left: 62%; }
+  .agente-beatriz { position: absolute; top: 50%; left: 68%; }
+  .agente-rafael { position: absolute; top: 50%; left: 56%; }
+</style>
+</head>
+<body>
+
+<div id="hud-top">
+  <div class="brand">🎬 AGÊNCIA VIELA VICE <span style="font-size:12px; color:#94a3b8; font-weight:500;">Operação Autônoma GTA 6 & RP</span></div>
+  <div style="display:flex; gap:10px; align-items:center;">
+    <div class="pill pill-cyan" id="hud-estoque">📦 Fila: 0/24 (4 Longos + 20 Shorts)</div>
+    <div class="pill pill-gold" id="hud-pendentes">👔 Pendentes Gerente: 0</div>
+    <div class="pill pill-green" id="hud-felicidade">😊 Moral Equipe: 90%</div>
+  </div>
+</div>
+
+<div id="viewport">
+  <div id="mapa-container">
+    <!-- TELINHA DE MONETIZACAO AO LADO DO GERENTE -->
+    <div id="monitor-gerente">
+      <div class="titulo-m">💰 Monetização Mensal</div>
+      <div class="valor-m" id="val-receita">R$ 0,00</div>
+      <div class="sub-m" id="txt-meta-mes">Meta: R$ 1.000,00 | Equipe: 10</div>
+      <button class="btn-mini" onclick="abrirModal('relatorio')">📊 Relatório Mensal</button>
+    </div>
+    <!-- CAMADA DE AGENTES DINAMICOS -->
+    <div id="camada-agentes"></div>
+  </div>
+</div>
+
+<div id="hud-bottom">
+  <button class="btn-estacao btn-destaque" onclick="abrirModal('gerente')">👔 Gerente (<span id="btn-pend">0</span>)</button>
+  <button class="btn-estacao btn-curadoria" onclick="abrirModal('curadoria')">🛡️ Curadoria Top 6</button>
+  <button class="btn-estacao" onclick="abrirModal('olheiro')">🔍 Olheiro & GTA 6</button>
+  <button class="btn-estacao" onclick="abrirModal('editor')">🎬 Editor (24)</button>
+  <button class="btn-estacao" onclick="abrirModal('lab')">🧠 Lab Evolução</button>
+  <button class="btn-estacao" onclick="abrirModal('engenharia')">⚙️ Engenharia</button>
+  <button class="btn-estacao" style="border-color:#10b981;color:#6ee7b7;" onclick="abrirModal('ti')">🖥️ Equipe T.I.</button>
+  <button class="btn-estacao" onclick="dispararReuniao()">🤝 Reunião</button>
+  <button class="btn-estacao" onclick="contratarReforco()">➕ Contratar</button>
+</div>
+
+<div id="modal-bg" onclick="if(event.target===this) fecharModal()">
+  <div id="modal-box">
+    <div class="modal-header">
+      <h2 id="modal-titulo" style="font-size:18px; color:#c084fc;">Estação</h2>
+      <button class="btn-fechar" onclick="fecharModal()">✕ Fechar</button>
+    </div>
+    <div id="modal-corpo"></div>
+  </div>
+</div>
+
+<script>
+let dadosGlobais = { pendentes: [], estoque: 0, noticias: [] };
+let reforcos = parseInt(localStorage.getItem("viela_reforcos") || "0");
+let emReuniao = false;
+
+const agentesConfig = [
+  { id: "gerente", nome: "👔 Dr. Ricardo • Diretor", linha: 1, filtro: "none", mesa: {x: 56, y: 31}, descanso: {x: 78, y: 55}, reuniao: {x: 50, y: 46}, x: 56, y: 31, fala: "Foco na meta mensal e retenção máxima!" },
+  { id: "curadora", nome: "🛡️ Camila • Curadoria Top 6", linha: 2, filtro: "none", mesa: {x: 43, y: 47}, descanso: {x: 68, y: 58}, reuniao: {x: 45, y: 49}, x: 43, y: 47, fala: "Zero tolerância com bugs no Top 6!" },
+  { id: "roteirista", nome: "⚡ Thiago • Roteirista", linha: 2, filtro: "hue-rotate(145deg) saturate(1.35) brightness(1.08)", mesa: {x: 24, y: 49}, descanso: {x: 72, y: 64}, reuniao: {x: 41, y: 48}, x: 24, y: 49, fala: "Testando gancho explosivo nos 3s iniciais!" },
+  { id: "olheiro", nome: "🕵️ Bruno • Olheiro GTA 6", linha: 3, filtro: "none", mesa: {x: 33, y: 39}, descanso: {x: 22, y: 56}, reuniao: {x: 43, y: 43}, x: 33, y: 39, fala: "Rastreando furos de GTA 6 e lives BR!" },
+  { id: "editor", nome: "🔥 Lucas • Editor Shorts", linha: 4, filtro: "none", mesa: {x: 38, y: 69}, descanso: {x: 52, y: 56}, reuniao: {x: 48, y: 52}, x: 38, y: 69, fala: "Ritmo frenético nos 20 Shorts verticais!" },
+  { id: "editor_longo", nome: "🎙️ Mariana • Editora Longos", linha: 4, filtro: "hue-rotate(210deg) saturate(1.25) brightness(1.05)", mesa: {x: 30, y: 61}, descanso: {x: 65, y: 63}, reuniao: {x: 46, y: 54}, x: 30, y: 61, fala: "Lapidando a narrativa dos 4 resumos longos..." },
+  { id: "auditor", nome: "🔬 Rafael • Auditor Técnico", linha: 5, filtro: "hue-rotate(95deg) saturate(1.3) brightness(1.1)", mesa: {x: 64, y: 48}, descanso: {x: 81, y: 59}, reuniao: {x: 54, y: 45}, x: 64, y: 48, fala: "Protegendo o HD e validando yuv420p!" },
+  { id: "ti_caio", nome: "💻 Caio • Líder de T.I.", linha: 5, filtro: "hue-rotate(175deg) saturate(1.4)", mesa: {x: 68, y: 34}, descanso: {x: 83, y: 53}, reuniao: {x: 55, y: 42}, x: 68, y: 34, fala: "Monitorando CPU, RAM e tempo de corte!" },
+  { id: "ti_beatriz", nome: "⚡ Beatriz • Gargalos T.I.", linha: 3, filtro: "hue-rotate(45deg) saturate(1.4)", mesa: {x: 74, y: 41}, descanso: {x: 86, y: 61}, reuniao: {x: 56, y: 48}, x: 74, y: 41, fala: "Analisando o que pode ser acelerado!" },
+  { id: "engenharia", nome: "🤖 Felipe • Engenheiro API", linha: 5, filtro: "none", mesa: {x: 58, y: 63}, descanso: {x: 74, y: 61}, reuniao: {x: 53, y: 50}, x: 58, y: 63, fala: "Pipelines Whisper e YouTube 100% blindados!" }
+];
+
+const extrasPool = [
+  { id: "sub1", nome: "Subagente Shorts", linha: 2, mesa: {x: 26, y: 49}, descanso: {x: 75, y: 65}, reuniao: {x: 46, y: 43}, x: 26, y: 49, fala: "Acelerando cortes verticais" },
+  { id: "sub2", nome: "Analista Retenção", linha: 3, mesa: {x: 64, y: 48}, descanso: {x: 81, y: 59}, reuniao: {x: 53, y: 44}, x: 64, y: 48, fala: "Otimizando ganchos de 3s" }
+];
+
+function getTodosAgentes() { return agentesConfig.concat(extrasPool.slice(0, reforcos)); }
+
+let framePose = 1;
+const spritesGarantidos = ['linha1_pose1.png', 'linha2_pose1.png', 'linha3_pose1.png', 'linha4_pose1.png', 'linha5_pose1.png'];
+function desenharAgentes() {
+  const camada = document.getElementById("camada-agentes");
+  if (!camada) return;
+  getTodosAgentes().forEach(ag => {
+    let el = document.getElementById("ag-" + ag.id);
+    const idxLinha = ((ag.linha || 1) - 1) % spritesGarantidos.length;
+    const arquivoBase = spritesGarantidos[idxLinha];
+    const arquivoAnimado = arquivoBase.replace("pose1", "pose" + framePose);
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "ag-" + ag.id;
+      el.className = "agente";
+      el.onclick = () => abrirModal(ag.id);
+      el.innerHTML = `<div class="balao" id="balao-${ag.id}">${ag.fala}</div><img id="img-${ag.id}" src="/sprites/${arquivoBase}" style="width:118px;height:118px;object-fit:contain;display:block;"><div class="tag-nome">${ag.nome}</div>`;
+      camada.appendChild(el);
+    }
+    el.style.left = ag.x + "%";
+    el.style.top = ag.y + "%";
+    const imgEl = document.getElementById("img-" + ag.id);
+    if (imgEl) {
+      imgEl.src = "/sprites/" + arquivoAnimado;
+      imgEl.onerror = function() { this.onerror = null; this.src = "/sprites/" + arquivoBase; };
+      imgEl.style.filter = ag.filtro || "none";
+    }
+    const b = document.getElementById("balao-" + ag.id);
+    if (b) {
+      b.innerText = ag.fala;
+      b.className = "balao" + (ag.id === "gerente" && (dadosGlobais.pendentes || []).length > 0 ? " alerta" : (emReuniao ? " feliz" : ""));
+    }
+  });
+}
+
+setInterval(() => { framePose = (framePose % 4) + 1; desenharAgentes(); }, 320);
+
+setInterval(() => {
+  if (emReuniao) return;
+  const pend = (dadosGlobais.pendentes || []).length;
+  const est = dadosGlobais.estoque || pend;
+  const brutos = dadosGlobais.brutos || 0;
+  const producaoAtiva = (brutos > 0 || est < 24);
+
+  getTodosAgentes().forEach(ag => {
+    if (ag.id === "gerente") {
+      if (pend > 0) {
+        ag.x = ag.mesa.x; ag.y = ag.mesa.y;
+        ag.fala = `🔔 Avaliando ${pend} vídeo(s) do Top 6`;
+      } else {
+        const irCafe = Math.random() > 0.5;
+        ag.x = irCafe ? ag.descanso.x : ag.mesa.x;
+        ag.y = irCafe ? ag.descanso.y : ag.mesa.y;
+        ag.fala = irCafe ? "☕ Livre: tomando café no lounge" : "📊 Sem pendências no momento";
+      }
+    } else if (ag.id === "curadora" || ag.id === "auditor") {
+      if (pend > 0 || brutos > 0) {
+        ag.x = ag.mesa.x; ag.y = ag.mesa.y;
+        ag.fala = ag.id === "curadora" ? "🛡️ Auditando e ranqueando Top 6" : "🔍 Verificando yuv420p e áudio limpo";
+      } else {
+        const passear = Math.random() > 0.5;
+        ag.x = passear ? ag.descanso.x : ag.mesa.x;
+        ag.y = passear ? ag.descanso.y : ag.mesa.y;
+        ag.fala = passear ? "☕ Auditoria em dia: pausa no sofá" : "✅ Qualidade 100% verificada";
+      }
+    } else if (ag.id === "olheiro" || ag.id === "roteirista") {
+      if (producaoAtiva) {
+        ag.x = ag.mesa.x; ag.y = ag.mesa.y;
+        ag.fala = ag.id === "olheiro" ? "🔍 Buscando lives BR e GTA 6 na mesa" : "✍️ Escrevendo ganchos de 3s na mesa";
+      } else {
+        const irLousa = Math.random() > 0.5;
+        ag.x = irLousa ? 29 : ag.descanso.x;
+        ag.y = irLousa ? 33 : ag.descanso.y;
+        ag.fala = irLousa ? "📰 Anotando ideias na lousa" : "☕ Meta 24 batida: descansando";
+      }
+    } else if (ag.id === "editor" || ag.id === "editor_longo" || ag.id === "sub1" || ag.id === "sub2") {
+      if (producaoAtiva) {
+        ag.x = ag.mesa.x; ag.y = ag.mesa.y;
+        ag.fala = ag.id === "editor" ? "✂️ Cortando 20 Shorts na estação" : "🎬 Editando 4 Longos narrados";
+      } else {
+        ag.x = ag.descanso.x; ag.y = ag.descanso.y;
+        ag.fala = "☕ Estoque 24/24 cheio: pausa merecida";
+      }
+    } else {
+      if (pend > 0 || brutos > 0) {
+        ag.x = ag.mesa.x; ag.y = ag.mesa.y;
+        ag.fala = "⚙️ Monitorando API YouTube e FFmpeg";
+      } else {
+        const passear = Math.random() > 0.5;
+        ag.x = passear ? ag.descanso.x : ag.mesa.x;
+        ag.y = passear ? ag.descanso.y : ag.mesa.y;
+        ag.fala = passear ? "☕ Sistemas estáveis: tomando café" : "⚙️ Engenharia 100% operacional";
+      }
+    }
+  });
+  desenharAgentes();
+}, 4000);
+
+function dispararReuniao() {
+  emReuniao = true;
+  const falas = ["Dr. Ricardo: Queremos bater a meta mensal com retenção alta!", "Camila: Só passa pro Gerente o Top 6 sem nenhum bug!", "Thiago: Vou turbinar as perguntas finais pra explodir comentários!", "Bruno: Achei tendências quentes de GTA 6 e RP BR hoje!", "Lucas: Meus 20 Shorts vão prender nos primeiros 3 segundos!", "Mariana: Os 4 resumos longos estão com história completa!", "Rafael: Zero lixo no HD e 100% em yuv420p garantido!", "Felipe: Agendamento automático nos 6 horários de pico OK!"];
+  getTodosAgentes().forEach((ag, i) => { ag.x = ag.reuniao.x; ag.y = ag.reuniao.y; ag.fala = falas[i % falas.length]; });
+  desenharAgentes();
+  setTimeout(() => { emReuniao = false; }, 12000);
+}
+
+function contratarReforco() {
+  if (reforcos < extrasPool.length) {
+    reforcos++;
+    localStorage.setItem("viela_reforcos", reforcos);
+    desenharAgentes();
+    alert("✅ Novo membro contratado! Ele já sentou na mesa livre do escritório.");
+  } else { alert("⭐ Todas as estações da Agência Viela Vice já estão completas!"); }
+}
+
+function fecharModal() { document.getElementById("modal-bg").style.display = "none"; }
+
+function abrirModal(tipo) {
+  const titulo = document.getElementById("modal-titulo");
+  const corpo = document.getElementById("modal-corpo");
+  document.getElementById("modal-bg").style.display = "flex";
+  if (tipo === "gerente") {
+    titulo.innerText = "👔 Diretoria — Avaliação Final (Top 6 Sem Bugs)";
+    const lista = dadosGlobais.pendentes || [];
+    if (lista.length === 0) { corpo.innerHTML = "<p>Nenhum vídeo pendente no momento. A Curadoria e o Editor estão preparando o próximo lote brasileiro!</p>"; return; }
+    corpo.innerHTML = lista.map((v, idx) => `<div class="card-video"><b>#${idx+1} Top 6 — ${v.arquivo}</b><video src="/exportacao/${v.arquivo}" controls style="width:100%;max-height:300px;margin:8px 0;"></video><input id="tit-${idx}" value="${v.titulo || 'Momento Épico GTA RP #Shorts'}"><textarea id="desc-${idx}" rows="2">${v.descricao || 'Inscreva-se no canal Viela Vice! #GTA6 #GTARP #Shorts'}</textarea><button class="btn-acao btn-aprovar" onclick="aprovarVideo('${v.arquivo}',${idx})">✅ Aprovar e Agendar</button><button class="btn-acao btn-negar" onclick="negarVideo('${v.arquivo}')">🗑️ Negar e Excluir</button></div>`).join("");
+  } else if (tipo === "curadoria") {
+    titulo.innerText = "🛡️ Setor de Qualidade & Curadoria (Líder das Reuniões)";
+    corpo.innerHTML = `<p>Auditoria anti-bugs ativa (cor yuv420p, áudio limpo, idioma PT-BR).<br><b>Meta da Fila:</b> 24 vídeos (4 Longos + 20 Shorts)<br><b>Entrega:</b> Top 6 do dia para o Gerente.</p><br><button class="btn-acao btn-aprovar" onclick="fecharModal();dispararReuniao();">🤝 Iniciar Reunião de Melhoria</button>`;
+  } else if (tipo === "ti" || tipo === "ti_caio" || tipo === "ti_beatriz") {
+    titulo.innerText = "🖥️ Setor de T.I. — Diagnóstico de Lentidão & Melhorias Reais";
+    corpo.innerHTML = "<p>Caio e Beatriz estão lendo os sensores do seu notebook agora...</p>";
+    fetch('/api/ti_diagnostico').then(r=>r.json()).then(d=>{
+      corpo.innerHTML = `
+        <div class="card-video" style="display:flex;justify-content:space-around;text-align:center;">
+          <div><small style="color:#94a3b8;">USO DE CPU</small><div style="font-size:22px;font-weight:800;color:${d.cpu>80?'#f87171':'#4ade80'};">${d.cpu}%</div></div>
+          <div><small style="color:#94a3b8;">MEMÓRIA RAM</small><div style="font-size:22px;font-weight:800;color:${d.ram>80?'#f87171':'#38bdf8'};">${d.ram}%</div></div>
+          <div><small style="color:#94a3b8;">HD LIVRE</small><div style="font-size:22px;font-weight:800;color:#facc15;">${d.disco_livre_gb} GB</div></div>
+          <div><small style="color:#94a3b8;">EM EDIÇÃO</small><div style="font-size:22px;font-weight:800;color:#c084fc;">${d.qtd_brutos} arq</div></div>
+        </div>
+        <div class="card-video">
+          <b style="color:#fbbf24;">⏱️ O que está demorando agora (Diagnóstico Caio):</b>
+          <ul style="margin:6px 0 0 18px;line-height:1.6;">${d.gargalos.map(g=>`<li>${g}</li>`).join('')}</ul>
+        </div>
+        <div class="card-video">
+          <b style="color:#34d399;">⚡ O que pode ser melhorado (Recomendações Beatriz):</b>
+          <ul style="margin:6px 0 0 18px;line-height:1.6;">${d.melhorias.map(m=>`<li>${m}</li>`).join('')}</ul>
+        </div>
+      `;
+    });
+  } else if (tipo === "relatorio") {
+    titulo.innerText = "📊 Relatório Mensal — Viela Vice";
+    corpo.innerHTML = `<p><b>Receita Mensal:</b> R$ 0,00<br><b>Equipe Ativa:</b> ${5+reforcos} agentes<br><b>Meta de Fila:</b> 24 vídeos (4 Longos + 20 Shorts)</p>`;
+  } else if (tipo === "olheiro") {
+    titulo.innerText = "🔍 Olheiro — Radar Brasil & GTA 6";
+    corpo.innerHTML = `<p>Monitorando lives brasileiras e novidades de GTA 6.</p><br><button class="btn-acao btn-aprovar" onclick="fetch('/api/buscar_lives',{method:'POST'});alert('Busca iniciada!');">🔍 Buscar Lives Agora</button>`;
+  } else if (tipo === "engenharia") {
+    titulo.innerText = "⚙️ Engenharia & Horários";
+    corpo.innerHTML = `<label>Horários (6 por dia):</label><input id="cfg-horarios" value="11:00, 13:30, 16:00, 18:30, 20:30, 22:30"><label>Links de Afiliado (Opcional):</label><textarea id="cfg-afiliados" rows="2"></textarea><button class="btn-acao btn-aprovar" onclick="salvarEngenharia()">💾 Salvar</button>`;
+  } else {
+    titulo.innerText = "🎬 Produção & Evolução";
+    corpo.innerHTML = `<p>Fila configurada para <b>24 vídeos (4 Longos + 20 Shorts)</b> com Whisper otimizado.</p>`;
+  }
+}
+
+async function aprovarVideo(arquivo, idx) {
+  const titulo = document.getElementById("tit-" + idx).value;
+  const descricao = document.getElementById("desc-" + idx).value;
+  const r = await fetch("/api/aprovar", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ arquivo, titulo, descricao }) });
+  const res = await r.json();
+  alert(res.mensagem || "Vídeo aprovado e agendado!");
+  fecharModal(); sincronizarDados();
+}
+
+async function negarVideo(arquivo) {
+  await fetch("/api/negar", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ arquivo, motivo: "Descartado" }) });
+  alert("🗑️ Vídeo excluído!");
+  fecharModal(); sincronizarDados();
+}
+
+async function salvarEngenharia() {
+  const horarios = document.getElementById("cfg-horarios").value;
+  const links = document.getElementById("cfg-afiliados").value;
+  await fetch("/api/salvar_afiliados", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ horarios, links, cupons: "" }) });
+  alert("💾 Configurações salvas!"); fecharModal();
+}
+
+async function sincronizarDados() {
+  try {
+    const r = await fetch("/api/data");
+    const d = await r.json();
+    dadosGlobais = Object.assign(dadosGlobais, d);
+    const pend = dadosGlobais.pendentes ? dadosGlobais.pendentes.length : 0;
+    document.getElementById("hud-estoque").innerText = `📦 Fila: ${dadosGlobais.estoque || pend}/24 (4 Longos + 20 Shorts)`;
+    document.getElementById("hud-pendentes").innerText = `👔 Pendentes Gerente: ${pend}`;
+    document.getElementById("btn-pend").innerText = pend;
+    document.getElementById("hud-felicidade").innerText = `😊 Moral Equipe: ${Math.min(100, 88 + reforcos*4 + pend*2)}%`;
+  } catch (e) {}
+}
+setInterval(sincronizarDados, 5000);
+sincronizarDados();
+desenharAgentes();
+</script>
+</body>
+</html>

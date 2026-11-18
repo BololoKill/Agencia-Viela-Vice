@@ -1,0 +1,46 @@
+# Ambientes Virtuais
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Configurações e Segredos (CRÍTICO - NUNCA SUBIR)
+.env
+*.env
+client_secret*.json
+token*.json
+cookies.txt
+*.pem
+*.key
+
+# Arquivos de Mídia e Temporários Pesados
+video-bruto/
+exportacao/*.mp4
+exportacao/*.mov
+exportacao/*.mkv
+exportacao/*.wav
+exportacao/*.avi
+referencias/*.mp4
+referencias/*.webm
+
+# Backups antigos e descartáveis
+_backups_antigos/
+*.bak*
+*.original_bak
+*bak_roxo*
+*bak_claro*
+archive/
+
+# Logs e arquivos de sistema
+*.log
+log_producao.txt
+historico.txt
+10240]
+.DS_Store
+Thumbs.db
+backup_antes_painel_*/
+
+backup_antes_painel_*/

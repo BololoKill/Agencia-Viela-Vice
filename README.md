@@ -19,6 +19,11 @@ O projeto adota uma estrutura modular em Python dividida em:
 - **`src/web/`**: Servidor Flask que serve a interface e rotas REST.
 - **`src/governance/`**: Registro de atas e diretrizes operacionais.
 
+## Producao
+
+Cada ciclo busca lives de GTA 6 na Twitch e no YouTube e produz ate 4 Shorts e 2 videos longos.
+A fila guarda no maximo 60 videos (40 Shorts e 20 longos), e a publicacao depende da aprovacao na Diretoria.
+
 ## Execucao
 
 O ponto de entrada unico e o `main.py`:

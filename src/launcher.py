@@ -111,9 +111,12 @@ def exibir_menu_interativo():
 
         elif cmd == "purge":
             print(f"\n{AMARELO}Executando limpeza de arquivos temporários do T.I...{RESET}")
-            from src.pipeline.worker import limpar_video_bruto
-            limpar_video_bruto()
-            print(f"{VERDE}Arquivos temporários limpos com sucesso!{RESET}")
+            subprocess.run([sys.executable, str(base_dir / "main.py"), "purge"], cwd=str(base_dir))
+            time.sleep(2)
+
+        elif cmd in ("run", "server") and status_porta:
+            print(f"\n{VERDE}A Agência já está rodando. Abrindo o painel no navegador...{RESET}")
+            webbrowser.open("http://localhost:8501")
             time.sleep(2)
 
         elif cmd in ("run", "server"):

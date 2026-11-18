@@ -60,8 +60,13 @@ archive/
 log_producao.txt
 historico.txt
 status_vigia.json
+ata_reunioes.json
+falhas_pipeline.json
+controle_producao.json
+cotas_youtube.json
+.ciclo_producao.lock
+*.tmp
 10240]
 .DS_Store
 Thumbs.db
 desktop.ini
-ata_reunioes.json

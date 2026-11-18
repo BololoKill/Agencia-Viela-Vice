@@ -51,6 +51,13 @@ def auditar_video(caminho_video: Path):
     except Exception as e:
         return False, f"Arquivo corrompido ou ilegível: {e}", 0
 
+def montar_top6(aprovados: list) -> list:
+    """Entrega 4 Shorts e 2 Longos. Quando faltar um tipo, completa com os melhores do outro."""
+    escolhidos = [a for a in aprovados if a["tipo"] == "short"][:4] + [a for a in aprovados if a["tipo"] == "longo"][:2]
+    restantes = [a for a in aprovados if a not in escolhidos]
+    return sorted(escolhidos + restantes[:6 - len(escolhidos)], key=lambda a: a["nota"], reverse=True)
+
+
 def executar_curadoria():
     """Varre a pasta de exportação, remove vídeos com falhas e ranqueia o Top 6 para a Diretoria."""
     if not EXPORT_DIR.exists():
@@ -77,7 +84,7 @@ def executar_curadoria():
             })
 
     aprovados.sort(key=lambda x: x["nota"], reverse=True)
-    top6 = aprovados[:6]
+    top6 = montar_top6(aprovados)
 
     relatorio = {
         "atualizado_em": datetime.now().strftime("%d/%m/%Y %H:%M"),

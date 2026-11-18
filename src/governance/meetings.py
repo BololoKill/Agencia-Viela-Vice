@@ -6,7 +6,7 @@ from src.config import ATA_REUNIOES_FILE, RANKING_CURADORIA_FILE
 from src.utils import load_json_safe, save_json_safe
 
 NORMAS_FIXAS = [
-    "Estoque balanceado de 24 vídeos (4 Longos + 20 Shorts)",
+    "Estoque máximo de 60 vídeos (40 Shorts + 20 Longos), na proporção diária de 4 Shorts e 2 Longos",
     "Idioma 100% Português do Brasil (pt-BR) e codec yuv420p",
     "Aprovação humana obrigatória na Diretoria antes de postar",
     "Transparência total sobre monetização e links de afiliados",

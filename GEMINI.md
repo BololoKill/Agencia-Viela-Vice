@@ -41,7 +41,7 @@ Com base na análise dos vídeos de referência (`3yGYehFfUP8` e `zrre7u9a6qM`),
 1. **Velocidade:** Uso do modelo `--model base` do Whisper para transcrição rápida em notebooks.
 2. **Proteção Contra Strike (Monetização):** Inclusão automática de créditos (`"Créditos: Live de [Nome do Streamer]"`) e variação rotativa de hashtags para evitar detecção de spam.
 3. **Segurança da API & Limite de Estoque (Rate Limiting & Storage):**
-   - **Gerenciamento via `painel.py`:** Limitar o envio a no máximo 6 vídeos por dia (5 Shorts + 1 Resumo Longo), espaçados por intervalos de 3 horas.
+   - **Gerenciamento via `painel.py`:** Limitar o envio a no máximo 6 vídeos por dia (4 Shorts + 2 Vídeos Longos), espaçados por intervalos de 3 horas.
    - **Limite de Estoque (2x a Meta Diária = 12 vídeos):** Antes de buscar ou baixar qualquer nova live, o sistema (`robo_cortes.py` e `vigia_lives.py`) verifica a pasta `exportacao`. Se já houver 12 ou mais vídeos `.mp4` prontos aguardando revisão, a criação é pausada imediatamente para evitar acúmulo no disco, retomando apenas quando o estoque cair abaixo de 12.
 4. **Descoberta Dinâmica & Limpeza:** Monitoramento de novos criadores (`streamers_descobertos.json`) e limpeza automática da pasta `video-bruto`.
 5. **Transparência Total (Afiliados e Cupons):** O `painel.py` gerencia links de afiliado e cupons gamer, incluindo automaticamente o aviso de transparência no final da descrição: `"Transparência: Links de afiliado oficiais. Comprando por aqui você apoia o canal sem pagar nada a mais."`.
@@ -62,9 +62,9 @@ Com base na análise dos vídeos de referência (`3yGYehFfUP8` e `zrre7u9a6qM`),
 - **Horários de Pico:** Priorizar agendamentos nos horários de maior retenção (18:00 e 21:00).
 
 
-## NOVA ESTRUTURA DE PRODUCAO E SETOR DE CURADORIA (24 VIDEOS)
-- META DE ESTOQUE TOTAL: 24 videos prontos na fila (exatamente 4 videos longos/resumos e 20 Shorts).
+## NOVA ESTRUTURA DE PRODUCAO E SETOR DE CURADORIA (60 VIDEOS)
+- META DE ESTOQUE TOTAL: ate 60 videos prontos na fila (40 Shorts e 20 videos longos).
 - SETOR DE CONTROLE DE QUALIDADE & CURADORIA (LIDER DE REUNIOES):
   1. Audita automaticamente 100% dos videos gerados antes de chegarem ao Gerente (checando codec yuv420p, audio sem falhas, idioma pt-BR, censura e duracao). Videos com bugs sao apagados automaticamente.
-  2. Ranqueia os videos aprovados na auditoria e entrega ao Gerente apenas o TOP 6 DO DIA (1 Longo + 5 Shorts com maior potencial de retencao).
+  2. Ranqueia os videos aprovados na auditoria e entrega ao Gerente apenas o TOP 6 DO DIA (2 Longos + 4 Shorts com maior potencial de retencao).
   3. Lidera as reunioes periodicas da agencia, ditando melhorias de automacao e atualizando as diretrizes da equipe conforme o desempenho.

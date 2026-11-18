@@ -12,16 +12,29 @@ class TestAgentsBehavior(unittest.TestCase):
 
     def test_sprites_existem(self):
         """Garante que todas as poses de spritesheets dos agentes existem em disco."""
-        sprites_dir = BASE_DIR / "sprites"
+        sprites_dir = BASE_DIR / "sprites" / "personagens"
         self.assertTrue(sprites_dir.exists(), "Diretório de sprites não encontrado")
 
-        linhas_esperadas = ["linha1", "linha2", "linha3", "linha4", "linha5"]
+        equipe = ["dr_ricardo", "camila", "bruno", "lucas", "mariana", "caio", "beatriz", "thiago"]
         poses_esperadas = ["pose1", "pose2", "pose3", "pose4"]
 
-        for l in linhas_esperadas:
+        for pessoa in equipe:
             for p in poses_esperadas:
-                arquivo = sprites_dir / f"{l}_{p}.png"
+                arquivo = sprites_dir / f"{pessoa}_{p}.png"
                 self.assertTrue(arquivo.exists(), f"Sprite ausente: {arquivo.name}")
+
+    def test_escritorio_e_personagem_do_sofa_estao_disponiveis(self):
+        """Garante os arquivos do escritório e a animação do personagem deitado no sofá."""
+        from src.web.app import app
+        cliente = app.test_client()
+        resposta = cliente.get("/escritorio.js")
+        self.assertEqual(resposta.status_code, 200)
+        codigo = resposta.get_data(as_text=True)
+        for trecho in ("function iniciarEscritorio(", "function calcularRota(", "sofa_quadro", "soltarFumaca"):
+            self.assertIn(trecho, codigo)
+        self.assertIn('/escritorio.js', cliente.get("/").get_data(as_text=True))
+        for quadro in (1, 2, 3):
+            self.assertTrue((BASE_DIR / "sprites" / f"sofa_quadro{quadro}.png").exists())
 
     def test_logica_profundidade_z_index(self):
         """Valida se o cálculo de z-index respeita a perspectiva isométrica (Y maior = mais à frente)."""

@@ -28,11 +28,21 @@ STATUS_VIGIA_FILE = BASE_DIR / "status_vigia.json"
 RANKING_CURADORIA_FILE = BASE_DIR / "ranking_curadoria.json"
 ATA_REUNIOES_FILE = BASE_DIR / "ata_reunioes.json"
 METADADOS_FILE = BASE_DIR / "metadados_cortes.json"
+TRAVA_CICLO_FILE = BASE_DIR / ".ciclo_producao.lock"
+FALHAS_FILE = BASE_DIR / "falhas_pipeline.json"
+CONTROLE_PRODUCAO_FILE = BASE_DIR / "controle_producao.json"
+COTAS_FILE = BASE_DIR / "cotas_youtube.json"
+
+# Limite de envios por canal em cada ciclo, que reinicia às 05:00 (as "6 estrelas" do painel)
+COTA_DIARIA_CANAL = 6
+HORA_REINICIO_COTA = 5
 
 # Arquivos de assets fundamentais
 CTA_AUDIO = EXPORT_DIR / "cta.mp3"
 FONT_PATH = BASE_DIR / "arial.ttf"
-IMAGE_PATH = BASE_DIR / "novo_vice.png.jpeg"
+IMAGE_PATH = BASE_DIR / "arte_original" / "novo_vice.png.jpeg"
+MARCA_PATH = ASSETS_DIR / "marca_viela_vice.png"
+WHOOSH_PATH = ASSETS_DIR / "whoosh.wav"
 
 # Streamers Oficiais de GTA RP (Brasil)
 STREAMERS_BR = [
@@ -47,6 +57,13 @@ STREAMERS_BR = [
     "Davy Jones (Gameplayrj)",
     "Mount",
     "Jon Vlogs"
+]
+
+# Canais da Twitch verificados a cada varredura (login usado no endereço do canal)
+CANAIS_TWITCH = [
+    "alanzoka", "cellbit", "casimito", "coringa", "luqueta", "paulinholoko", "piuzinho", "gabepeixe",
+    "biquinho", "bagualu", "davyjones", "gameplayrj", "mount", "jonvlogs", "felps", "baiano",
+    "nobru", "brino", "rakin", "yetz", "thurzin", "bauky", "mwzera", "tck10",
 ]
 
 # Rede Oficial de 7 Canais do YouTube da Agência Viela Vice
@@ -72,11 +89,21 @@ VIDEO_SPECS = {
     "codec_v": "libx264",
     "codec_a": "aac",
     "bitrate_a": "192k",
-    "preset": "veryfast",
-    "crf": "21",
+    "preset": "medium",
+    "crf": "18",
     "duracao_min_shorts": 60.0,
     "duracao_max_shorts": 75.0,
-    "limite_estoque_max": 24  # 4 Longos + 20 Shorts
+    "limite_estoque_max": 60,  # Mantém a proporção diária de 4 Shorts para 2 Longos
+    "limite_shorts": 40,
+    "limite_longos": 20,
+    "shorts_por_ciclo": 4,
+    "longos_por_ciclo": 2,
+    "duracao_longo_s": 600.0,
+    "duracao_minima_longo_s": 480.0,
+    "janela_transcricao_s": 480.0,  # Trecho da live analisado pelo Whisper em cada ciclo
+    "duracao_conteudo_s": 66.0,  # Conteúdo do Short, sem contar a intro narrada
+    "captura_live_s": 1260,  # Tempo de gravação de uma live que ainda está no ar
+    "modelo_whisper": "small"
 }
 
 # Palavras-chave de alto CTR/viralidade

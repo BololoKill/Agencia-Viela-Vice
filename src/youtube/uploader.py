@@ -5,7 +5,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from src.youtube.auth import obter_credenciais
+from src.youtube.auth import CredencialYouTubeError, obter_credenciais
 
 def formatar_data_publicacao(data_str: str, hora_str: str) -> str:
     """Calcula timestamp ISO-8601 respeitando o mínimo de 15 minutos de antecedência exigido pelo YouTube."""
@@ -27,15 +27,17 @@ def enviar_video_agendado(
     Realiza o envio de vídeo agendado para o YouTube.
     Retorna (sucesso: bool, mensagem: str, video_id: str ou None).
     """
-    creds = obter_credenciais(canal_id)
-    if not creds:
-        return False, "Credenciais do canal não autorizadas ou ausentes", None
-
     try:
+        creds = obter_credenciais(canal_id)
+        if not creds:
+            return False, "Credenciais do canal não autorizadas ou ausentes", None
+
         youtube = build("youtube", "v3", credentials=creds)
         publish_at = formatar_data_publicacao(data_agenda, hora_agenda)
 
-        tags = ["GTA RP", "GTA 6", "GTA VI", "Viela Vice", "GTA RP Brasil", "Shorts", "Clipes GTA"]
+        tags = ["GTA RP", "GTA 6", "GTA VI", "Viela Vice", "GTA RP Brasil", "Clipes GTA"]
+        if "#shorts" in titulo.lower():
+            tags.append("Shorts")
         desc_completa = (descricao or "").strip()
         if "Viela Vice" not in desc_completa:
             desc_completa += "\n\nInscreva-se no canal Viela Vice para os melhores momentos de GTA RP e GTA 6!"
@@ -64,5 +66,7 @@ def enviar_video_agendado(
         vid_id = resp.get("id")
         return True, f"Agendado no canal com sucesso para {publish_at}", vid_id
 
+    except CredencialYouTubeError as e:
+        return False, str(e), None
     except Exception as e:
         return False, f"Erro YouTube API: {str(e)}", None

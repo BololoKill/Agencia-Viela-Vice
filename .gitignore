@@ -1,4 +1,6 @@
-# Ambientes Virtuais
+# ==========================================
+# Ambientes Virtuais e Dependências
+# ==========================================
 .venv/
 venv/
 ENV/
@@ -6,17 +8,31 @@ env/
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyd
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
 
-# Configurações e Segredos (CRÍTICO - NUNCA SUBIR)
+# ==========================================
+# Segurança, Segredos e Credenciais (CRÍTICO)
+# ==========================================
 .env
+.env.*
+!.env.example
 *.env
 client_secret*.json
+credentials*.json
 token*.json
-cookies.txt
+*.token
+*.secret
 *.pem
 *.key
+cookies.txt
 
+# ==========================================
 # Arquivos de Mídia e Temporários Pesados
+# ==========================================
 video-bruto/
 exportacao/*.mp4
 exportacao/*.mov
@@ -26,21 +42,25 @@ exportacao/*.avi
 referencias/*.mp4
 referencias/*.webm
 
-# Backups antigos e descartáveis
+# ==========================================
+# Backups e Diretórios Legados
+# ==========================================
 _backups_antigos/
+backup_antes_painel_*/
+archive/
 *.bak*
 *.original_bak
 *bak_roxo*
 *bak_claro*
-archive/
 
-# Logs e arquivos de sistema
+# ==========================================
+# Logs e Arquivos Transitórios de Runtime
+# ==========================================
 *.log
 log_producao.txt
 historico.txt
+status_vigia.json
 10240]
 .DS_Store
 Thumbs.db
-backup_antes_painel_*/
-
-backup_antes_painel_*/
+desktop.ini

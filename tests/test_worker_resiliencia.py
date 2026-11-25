@@ -197,10 +197,23 @@ class TestCicloViral(BaseCiclo):
         self.m["transcrever_audio"].assert_called()
 
     def test_video_de_outro_jogo_e_trocado_pelo_proximo(self):
+        self.m["confere_gta6"].side_effect = [False, False] + [True] * 10
+        self.assertTrue(worker.executar_ciclo_producao())
+        self.assertIn("v1", self._historico(), "outro jogo nos dois trechos: o vídeo não volta na busca")
+        self.assertEqual(self.m["baixar_video"].call_count, 7, "o começo e o meio do v1, e um trecho de cada outro")
+        criadores = {c for c, _ in self.m["roteiro_compilacao"].call_args.args[0]}
+        self.assertEqual(criadores, {f"Criador {i}" for i in range(2, 7)})
+
+    def test_outro_jogo_no_comeco_confere_o_meio_do_video(self):
+        """Regressão: o "jogando GTA 6 pela primeira vez" do Jon Vlogs foi descartado pelo começo da live (25/11)."""
         self.m["confere_gta6"].side_effect = [False] + [True] * 10
         self.assertTrue(worker.executar_ciclo_producao())
-        self.assertIn("v1", self._historico())
-        self.assertEqual(self.m["baixar_video"].call_count, 6)
+        trechos = [c.kwargs["trecho"] for c in self.m["baixar_video"].call_args_list[:2]]
+        self.assertEqual(trechos, [(360.0, 360.0), (1800.0, 360.0)])
+        criadores = {c for c, _ in self.m["roteiro_compilacao"].call_args.args[0]}
+        self.assertIn("Criador 1", criadores, "o meio do vídeo era GTA 6 e ele entrou no Top")
+        memoria = json.loads((self.raiz / "trechos_sem_fala.json").read_text(encoding="utf-8"))
+        self.assertEqual(memoria["v1"]["360"]["motivo"], "imagem de outro jogo")
 
     def test_falha_ao_baixar_um_video_nao_para_o_ciclo(self):
         def baixar(url, **kw):
@@ -311,6 +324,7 @@ class TestCicloViral(BaseCiclo):
     def test_caos_rate_limit_nao_condena_o_video(self):
         self.m["baixar_video"].side_effect = RuntimeError("HTTP Error 429: Too Many Requests")
         for _ in range(estado.MAX_TENTATIVAS_VIDEO + 1):
+            searcher._fontes["youtube_pausado_ate"] = 0.0  # A pausa de cada bloqueio já acabou
             self.assertFalse(worker.executar_ciclo_producao())
         self.assertEqual(self._status()["erro"]["categoria"], "rate_limit")
         self.assertFalse(estado.em_quarentena("v1"))
@@ -352,6 +366,50 @@ class TestVideoQueRendeShortOuTop(BaseCiclo):
 
     def test_trecho_do_top_usado_na_conferencia_e_o_do_top_completo(self):
         self.assertAlmostEqual(worker.TRECHO_DO_TOP_S, 102.0)
+
+
+class TestPausaDoYouTube(BaseCiclo):
+    """
+    Regressão de 25/11: com o YouTube em pausa pelo bloqueio anti-robô, o painel repetia "Buscando..." e
+    "Nenhum vídeo viral novo" a cada 30 s; e um reinício no meio da pausa voltaria a chamar o YouTube antes da hora.
+    """
+
+    def test_em_pausa_nao_pede_nada_e_avisa_ate_que_horas(self):
+        searcher.pausar_youtube(600)
+        for _ in range(3):
+            self.assertFalse(worker.executar_ciclo_producao())
+        self.m["buscar_videos_virais"].assert_not_called()
+        self.m["ia_respondendo"].assert_not_called()
+        self.assertRegex(self._status()["etapa"], r"^YouTube em pausa até \d\d:\d\d por causa do bloqueio anti-robô")
+        registro = self.log_file.read_text(encoding="utf-8")
+        self.assertEqual(registro.count("YouTube em pausa até"), 1, "o aviso não se repete a cada volta")
+        self.assertNotIn("Nenhum vídeo viral novo", registro)
+
+    def test_pausa_continua_depois_de_um_reinicio(self):
+        searcher.pausar_youtube(600)
+        searcher._fontes["youtube_pausado_ate"] = 0.0  # O painel reiniciou: a memória do processo foi perdida
+        searcher.carregar_pausa()
+        self.assertIsNotNone(searcher.youtube_pausado_ate())
+        self.assertFalse(worker.executar_ciclo_producao())
+        self.m["buscar_videos_virais"].assert_not_called()
+
+    def test_pausa_vencida_ou_arquivo_estragado_nao_seguram_a_producao(self):
+        arquivo = self.raiz / "pausa_youtube.json"
+        for conteudo in (json.dumps({"ate": time.time() - 10}), "{ isto não é json", json.dumps({"ate": "amanhã"})):
+            with self.subTest(conteudo=conteudo):
+                arquivo.write_text(conteudo, encoding="utf-8")
+                searcher._fontes["youtube_pausado_ate"] = 0.0
+                searcher.carregar_pausa()
+                self.assertIsNone(searcher.youtube_pausado_ate())
+
+    def test_bloqueio_no_download_guarda_a_pausa(self):
+        def bloquear(url, **kw):
+            raise RuntimeError("Sign in to confirm you're not a bot")
+
+        self.m["baixar_video"].side_effect = bloquear
+        self.assertFalse(worker.executar_ciclo_producao())
+        dados = json.loads((self.raiz / "pausa_youtube.json").read_text(encoding="utf-8"))
+        self.assertGreater(dados["ate"], time.time() + 3600)
 
 
 class TestMemoriaDosTrechosSemFala(BaseCiclo):
@@ -611,6 +669,27 @@ class TestBloqueioDoYoutube(BaseCiclo):
         self.assertEqual(self.m["baixar_video"].call_count, 1, "não insiste nos outros vídeos")
         self.assertGreater(searcher._fontes["youtube_pausado_ate"], time.monotonic())
         self.assertEqual(self._status()["erro"]["espera_s"], worker.ESPERA_APOS_BLOQUEIO_S)
+
+    def test_bloqueio_registra_o_motivo_dado_pelo_youtube(self):
+        self.m["baixar_video"].side_effect = RuntimeError("ERROR: [youtube] v1: " + self.ERRO + ". Use --cookies")
+        worker.executar_ciclo_producao()
+        self.assertIn("Motivo dado pelo YouTube: ERROR: [youtube] v1: " + self.ERRO, self.log_file.read_text(encoding="utf-8"))
+
+    def test_video_com_restricao_de_idade_sai_sem_pausar_o_youtube(self):
+        """Regressão: "Sign in to confirm your age" pausava a produção inteira por 2 horas (LuquEt4, 25/11)."""
+        def baixar(url, **kw):
+            if url.endswith("v1"):
+                raise RuntimeError("ERROR: [youtube] v1: Sign in to confirm your age. "
+                                   "This video may be inappropriate for some users.")
+            return self._baixar(url, **kw)
+
+        self.m["baixar_video"].side_effect = baixar
+        self.assertTrue(worker.executar_ciclo_producao(), "os outros vídeos seguem")
+        self.assertIsNone(searcher.youtube_pausado_ate(), "o YouTube não entra em pausa")
+        self.assertIn("v1", self._historico(), "o vídeo restrito não volta na próxima busca")
+        criadores = {c for c, _ in self.m["roteiro_compilacao"].call_args.args[0]}
+        self.assertEqual(criadores, {f"Criador {i}" for i in range(2, 7)})
+        self.assertEqual(self.m["baixar_video"].call_count, 6, "o vídeo restrito foi pedido uma vez só")
 
     def test_bloqueio_durante_a_busca_tambem_pausa_o_youtube(self):
         self.m["buscar_videos_virais"].side_effect = RuntimeError(self.ERRO)

@@ -5,6 +5,7 @@ O título e a categoria da transmissão podem estar errados: a prova é o que ap
 import io
 import json
 import os
+import re
 import subprocess
 import time
 from datetime import datetime
@@ -30,6 +31,10 @@ TEMPO_LIMITE_QUADRO_S = 60
 PAUSA_IA_S = 1800  # Depois de uma falha geral, a checagem segue só pela cor por 30 minutos
 
 _ia = {"pausada_ate": 0.0}
+
+# GTA V e GTA VI têm a mesma interface (minimapa, estrelas, celular) e a IA confunde os dois; a busca já descarta os
+# títulos de GTA 5. Regressão: o mesmo trecho do Paulinho o Loko saiu como GTA VI duas vezes e como GTA V na terceira.
+_GTA_ANTERIOR = re.compile(r"(?i)\b(gta|grand\s+theft\s+auto)\s*(v|5)\b")
 
 # GTA VI saiu em 19/11/2026 e a IA quase não viu o jogo: sem as pistas abaixo ela confundiu um GTA VI com Far Cry 6
 PERGUNTA = (
@@ -124,7 +129,9 @@ def _perguntar_a_ia(quadros: list):
     for modelo in VIDEO_SPECS["modelos_visao"]:
         try:
             resposta = cliente.models.generate_content(model=modelo, contents=conteudo, config=configuracao)
-            return _veredito(json.loads(resposta.text))
+            veredito = _veredito(json.loads(resposta.text))
+            # O registro diz qual modelo respondeu: os mais leves erram mais o jogo
+            return {**veredito, "modelo": modelo} if isinstance(veredito, dict) else veredito
         except Exception as e:
             # Só o tipo do erro vai para o registro: a mensagem do serviço poderia carregar dados da conexão.
             falha = type(e).__name__
@@ -141,6 +148,8 @@ def _mostra_outro_jogo(veredito) -> bool:
     try:
         confianca = float(veredito.get("confianca"))
     except (TypeError, ValueError):
+        return False
+    if _GTA_ANTERIOR.search(str(veredito.get("jogo") or "")):
         return False
     return veredito.get("tem_jogo_na_tela") is True and veredito.get("e_gta6") is False and confianca >= CONFIANCA_MINIMA
 
@@ -159,5 +168,8 @@ def confere_gta6(video, inicio: float = 0.0, duracao: float = None) -> bool:
         log_terminal(f"[TEMA] A IA respondeu fora do formato combinado ({type(veredito).__name__}); "
                      "vale a checagem de cor.")
         return not _imagem_sem_cor(quadros)
-    log_terminal(f"[TEMA] Jogo identificado na imagem: {veredito.get('jogo')} (confiança {veredito.get('confianca')}).")
+    modelo = f", {veredito['modelo']}" if veredito.get("modelo") else ""
+    log_terminal(f"[TEMA] Jogo identificado na imagem: {veredito.get('jogo')} (confiança {veredito.get('confianca')}{modelo}).")
+    if _GTA_ANTERIOR.search(str(veredito.get("jogo") or "")):
+        log_terminal("[TEMA] A IA confunde GTA V com GTA VI: o vídeo segue, e a palavra final é sua na Diretoria.")
     return not _mostra_outro_jogo(veredito)

@@ -39,14 +39,20 @@ Os Shorts saíam sem marca visível e sem a narração final, a edição estava 
 
 1. Matéria-prima: os vídeos de GTA 6 em português mais vistos da semana; com a semana aproveitada, os do mês. Lives não são mais gravadas.
 2. Títulos fora do tema são ignorados: contagem regressiva, GTA 5 e transmissões em outro idioma.
+   Se o começo do vídeo mostrar outro jogo, o meio é conferido antes de descartá-lo: live às vezes começa
+   com outro jogo enquanto o GTA 6 não abre. A IA de imagem confunde GTA V com GTA 6 (mesma interface):
+   um veredito de GTA V não descarta o vídeo, e a palavra final é da Diretoria.
 3. De cada vídeo viral são baixados só 6 minutos; um criador entra no máximo uma vez por ciclo.
    A imagem e o som descem separados. Se o YouTube derruba a conexão, o download continua de onde parou,
-   e a parte que chega cortada é baixada de novo sozinha.
+   e a parte que chega cortada é baixada de novo sozinha. Se o FFmpeg cair no meio, a parte é baixada de novo uma vez.
 4. Áudio que não esteja em português é descartado antes do render.
 5. Um trecho conferido sem fala do criador em português fica guardado por 30 dias (`trechos_sem_fala.json`) e não é
    baixado de novo: o próximo ciclo vai direto para o outro trecho do vídeo.
 6. Os downloads e os arquivos temporários ficam no SSD (`D:/VielaVice/video-bruto`), que é mais rápido e poupa o HD do
    Windows; sem o SSD, ficam na pasta do projeto. Os vídeos prontos continuam em `exportacao`.
+7. Bloqueio anti-robô do YouTube pausa a busca e os downloads por 2 horas, sem login e sem tentar driblar o bloqueio.
+   A pausa fica guardada (`pausa_youtube.json`) e continua valendo depois de um reinício; o painel mostra até que horas.
+8. Vídeo com restrição de idade ou só para membros do canal não é bloqueio: sai da busca na hora, sem pausar o YouTube.
 
 ### Produção e estoque
 

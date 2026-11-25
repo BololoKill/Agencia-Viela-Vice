@@ -169,6 +169,50 @@ class TestParteCortada(AmbienteIsolado):
         self.assertEqual(info["categoria"], "download_incompleto")
         self.assertTrue(info["transitorio"], "o vídeo não vai para a quarentena por uma falha de rede")
 
+    def _baixar_com_quedas(self, *erros):
+        """erros: o que cada descida faz, na ordem (None baixa a parte inteira)."""
+        self.descidas = []
+        fila = iter(erros)
+
+        def descer(_url, pasta, rotulo, *_args):
+            self.descidas.append(rotulo)
+            erro = next(fila, None)
+            if erro:
+                raise erro
+            parte = pasta / f"live_bruta.{rotulo}.mp4"
+            parte.write_bytes(b"x")
+            return parte
+
+        with mock.patch.object(downloader, "_descer", side_effect=descer), \
+                mock.patch.object(downloader, "_duracoes", return_value={"video": 360.0, "audio": 360.0}), \
+                mock.patch.object(downloader, "executar_ffmpeg",
+                                  side_effect=lambda args, **_kw: Path(args[-2]).write_bytes(b"junto")), \
+                mock.patch.object(downloader, "_arquivo_completo", return_value=True), \
+                mock.patch.object(downloader, "log_terminal") as self.log:
+            return downloader.baixar_video("https://youtu.be/x", self.bruto_dir, trecho=(600.0, 360.0))
+
+    def test_ffmpeg_que_cai_no_meio_ganha_outra_tentativa(self):
+        """Regressão: o FFmpeg caiu no meio do trecho do alanzoka (código 3436169992) e o vídeo foi perdido."""
+        queda = downloader.yt_dlp.utils.DownloadError("ERROR: ffmpeg exited with code 3436169992")
+        self.assertEqual(self._baixar_com_quedas(queda).name, "live_bruta.mp4")
+        self.assertEqual(self.descidas, ["imagem", "imagem", "som"])
+        self.assertIn("parou no meio do download", self.log.call_args.args[0])
+
+    def test_ffmpeg_que_cai_duas_vezes_fica_para_o_proximo_ciclo(self):
+        queda = downloader.yt_dlp.utils.DownloadError("ERROR: ffmpeg exited with code 1")
+        with self.assertRaises(downloader.DownloadIncompleto) as erro:
+            self._baixar_com_quedas(queda, queda)
+        self.assertTrue(estado.classificar_erro(erro.exception)["transitorio"])
+        self.assertEqual(list(self.bruto_dir.iterdir()), [])
+
+    def test_bloqueio_do_youtube_nao_e_repetido(self):
+        """O pedido de confirmação anti-robô sobe na hora: o ciclo pausa o YouTube em vez de insistir."""
+        bloqueio = downloader.yt_dlp.utils.DownloadError("ERROR: Sign in to confirm you're not a bot")
+        with self.assertRaises(downloader.yt_dlp.utils.DownloadError):
+            self._baixar_com_quedas(bloqueio)
+        self.assertEqual(self.descidas, ["imagem"])
+        self.assertEqual(estado.classificar_erro(bloqueio)["categoria"], "bloqueio_youtube")
+
     def test_arquivo_juntado_que_nao_abre_fica_para_o_proximo_ciclo(self):
         with mock.patch.object(downloader, "_baixar_trecho", return_value=self.bruto_dir / "live_bruta.mp4"), \
                 mock.patch.object(downloader, "_arquivo_completo", return_value=False):

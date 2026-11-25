@@ -6,11 +6,12 @@ da semana no YouTube, no máximo um por criador. Com a semana toda aproveitada, 
 import random
 import re
 import time
+from datetime import datetime
 from urllib.parse import quote_plus
 import yt_dlp
-from src.config import STREAMERS_BR, DESCOBERTOS_PATH, HISTORICO_FILE
+from src.config import STREAMERS_BR, DESCOBERTOS_PATH, HISTORICO_FILE, PAUSA_YOUTUBE_FILE
 from src.pipeline.estado import classificar_erro, em_quarentena
-from src.utils import load_json_safe, log_terminal
+from src.utils import load_json_safe, log_terminal, save_json_safe
 
 CATEGORIAS_BLOQUEIO = ("rate_limit", "bloqueio_youtube")
 # Resultados ordenados por visualizações, só vídeos: publicados nesta semana e, na reserva, neste mês
@@ -68,8 +69,30 @@ def registrar_historico(identificador: str):
 
 
 def pausar_youtube(segundos: int = PAUSA_YOUTUBE_S):
-    """Respeita um bloqueio do YouTube: a busca descansa e só volta quando a pausa acabar."""
+    """
+    Respeita um bloqueio do YouTube: a busca descansa e só volta quando a pausa acabar.
+    A pausa fica guardada em arquivo: um reinício do painel no meio dela não volta a chamar o YouTube antes da hora.
+    """
     _fontes["youtube_pausado_ate"] = time.monotonic() + segundos
+    save_json_safe(PAUSA_YOUTUBE_FILE, {"ate": time.time() + segundos})
+
+
+def youtube_pausado_ate():
+    """Hora (HH:MM) em que a pausa do YouTube acaba, ou None quando ele não está em pausa."""
+    restante = _fontes["youtube_pausado_ate"] - time.monotonic()
+    return datetime.fromtimestamp(time.time() + restante).strftime("%H:%M") if restante > 0 else None
+
+
+def carregar_pausa():
+    """Ao iniciar, retoma a pausa do YouTube que ainda não acabou."""
+    dados = load_json_safe(PAUSA_YOUTUBE_FILE, {})
+    try:
+        restante = float(dados.get("ate", 0)) - time.time() if isinstance(dados, dict) else 0.0
+    except (TypeError, ValueError):
+        restante = 0.0
+    if restante > 0:
+        fim = time.monotonic() + min(restante, PAUSA_YOUTUBE_S)
+        _fontes["youtube_pausado_ate"] = max(_fontes["youtube_pausado_ate"], fim)
 
 
 def titulo_e_gta6(titulo: str) -> bool:
@@ -223,3 +246,7 @@ def buscar_videos_virais(quantidade: int, ignorar=()) -> list:
     if not escolhidos and consultas.ultimo_erro is not None and consultas.ok == 0:
         raise consultas.ultimo_erro
     return escolhidos
+
+
+# Um reinício no meio de uma pausa por bloqueio anti-robô continua respeitando a pausa
+carregar_pausa()

@@ -21,7 +21,9 @@ from src.pipeline.edicao import (
     montar_publicacao_compilacao, selecionar_melhores_cortes
 )
 from src.pipeline.ffmpeg_runner import detectar_intervalos_comerciais, detectar_telas_pretas
-from src.pipeline.searcher import CATEGORIAS_BLOQUEIO, buscar_videos_virais, pausar_youtube, registrar_historico
+from src.pipeline.searcher import (
+    CATEGORIAS_BLOQUEIO, buscar_videos_virais, pausar_youtube, registrar_historico, youtube_pausado_ate
+)
 from src.pipeline.downloader import baixar_video
 from src.pipeline.verificador import confere_gta6
 from src.pipeline.roteiro import (
@@ -42,6 +44,7 @@ PREFIXO_LONGO = "longo-"
 PREFIXO_FONTE = "fonte"
 ESPERA_APOS_BLOQUEIO_S = 60
 CANDIDATOS_EXTRAS = 3  # Alguns virais caem na conferência (outro idioma, outro jogo): a busca traz alguns a mais
+CATEGORIAS_DO_VIDEO = ("restricao_idade", "so_membros")  # O vídeo nunca abre sem login: sai da busca na hora
 TRECHO_MINIMO_S = 60.0
 TRECHO_MAXIMO_S = 150.0
 PASTAS_ANTIGAS = ("proxima",)  # Gravação adiantada de live, que não existe mais
@@ -258,11 +261,15 @@ def _preparar_fonte(video_info: dict, numero: int, total: int):
             guardar_trecho_sem_fala(video_info["id"], inicio, motivo)
             continue
         if not jogo_conferido:
-            # O jogo não muda de um trecho para outro: a imagem é conferida uma vez só
+            # Confirmado o GTA 6 num trecho, os outros trechos do mesmo vídeo não são conferidos de novo
             atualizar_status_producao(f"Conferindo o jogo no vídeo viral {numero}/{total} ({streamer})...", pct, streamer)
             if not confere_gta6(arquivo):
-                log_terminal(f"[TEMA] A imagem não é de GTA 6, vídeo ignorado: {streamer} | {video_info['title']}")
-                return None
+                # Live às vezes começa com outro jogo enquanto o GTA 6 não abre: o meio do vídeo é conferido antes de
+                # descartá-lo. Regressão: o "jogando GTA 6 pela primeira vez" do Jon Vlogs saiu como Far Cry 6 (25/11)
+                motivo = "imagem de outro jogo"
+                log_terminal(f"[TEMA] {streamer}: o trecho {tentativa} não mostra GTA 6.")
+                guardar_trecho_sem_fala(video_info["id"], inicio, motivo)
+                continue
             jogo_conferido = True
 
         atualizar_status_producao(f"Transcrevendo o vídeo viral {numero}/{total} ({streamer})...", pct + 3, streamer)
@@ -308,6 +315,10 @@ def _preparar_fontes(candidatos: list, precisa: int) -> list:
             if info["categoria"] in CATEGORIAS_BLOQUEIO:
                 raise
             log_terminal(f"[FONTE] {video_info['streamer']} | {video_info['title']}: {info['mensagem']}")
+            if info["categoria"] in CATEGORIAS_DO_VIDEO:
+                registrar_historico(video_info["id"])
+                registrar_historico(video_info["url"])
+                continue
             if not info["transitorio"]:
                 estado.registrar_falha(video_info["id"], info)
             continue
@@ -499,6 +510,8 @@ def _registrar_erro(erro: Exception, video_info: dict = None):
         pausar_youtube()
         info = {**info, "espera_s": ESPERA_APOS_BLOQUEIO_S}
         log_terminal("[BUSCA] YouTube em pausa por 2 horas por causa do bloqueio anti-robô. A busca volta depois da pausa.")
+        # O motivo exato do YouTube fica no registro: é ele que mostra se o bloqueio é da conexão ou de um vídeo só
+        log_terminal(f"[BUSCA] Motivo dado pelo YouTube: {' '.join(str(erro).split())[:200]}")
     if video_info and not info["transitorio"]:
         tentativas = estado.registrar_falha(video_info["id"], info)
         if tentativas >= estado.MAX_TENTATIVAS_VIDEO:
@@ -522,6 +535,14 @@ def executar_ciclo_producao():
             if not vagas_shorts and not vagas_longos:
                 limite_estoque = VIDEO_SPECS["limite_estoque_max"]
                 atualizar_status_producao(f"Estoque completo ({obter_quantidade_estoque()}/{limite_estoque}). Em pausa.")
+                return False
+
+            # Bloqueio anti-robô: nada é pedido ao YouTube até a pausa acabar. Regressão: o painel repetia "Buscando..."
+            # e "Nenhum vídeo viral novo" a cada 30 s durante a pausa, sem dizer o motivo (25/11)
+            pausa = youtube_pausado_ate()
+            if pausa:
+                atualizar_status_producao(f"YouTube em pausa até {pausa} por causa do bloqueio anti-robô. "
+                                          "A produção volta sozinha depois disso.")
                 return False
 
             # Sem a IA de roteiro nenhum vídeo pode ser narrado: nem vale baixar

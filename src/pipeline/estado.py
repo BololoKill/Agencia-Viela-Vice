@@ -55,6 +55,14 @@ def classificar_erro(erro: Exception) -> dict:
         return resultado("gravacao_travada", f"{erro} Esse vídeo fica de fora por 30 min.", True, 30)
     if "429" in texto or "too many requests" in texto:
         return resultado("rate_limit", "YouTube limitou as requisições (HTTP 429).", True, 900)
+    # Restrição de idade e conteúdo só para membros são do vídeo, não um bloqueio: o resto da produção segue.
+    # Regressão: "Sign in to confirm your age" pausava o YouTube por 2 horas como se fosse anti-robô (LuquEt4, 25/11)
+    if "confirm your age" in texto or "age-restricted" in texto or "inappropriate for some users" in texto:
+        return resultado("restricao_idade", "Vídeo com restrição de idade: o YouTube só mostra com login e a agência "
+                         "não usa login. Ele sai da lista.", False, 0)
+    if "members-only" in texto or "join this channel" in texto:
+        return resultado("so_membros", "Vídeo só para membros do canal: a agência não tem acesso. Ele sai da lista.",
+                         False, 0)
     if "not a bot" in texto or "sign in to confirm" in texto:
         return resultado("bloqueio_youtube", "YouTube pediu confirmação anti-robô no download.", True, 1800)
     if "quota" in texto:

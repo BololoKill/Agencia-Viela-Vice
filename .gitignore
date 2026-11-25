@@ -65,6 +65,7 @@ falhas_pipeline.json
 controle_producao.json
 cotas_youtube.json
 trechos_sem_fala.json
+pausa_youtube.json
 .ciclo_producao.lock
 *.tmp
 10240]

@@ -38,6 +38,7 @@ FALHAS_FILE = BASE_DIR / "falhas_pipeline.json"
 CONTROLE_PRODUCAO_FILE = BASE_DIR / "controle_producao.json"
 COTAS_FILE = BASE_DIR / "cotas_youtube.json"
 TRECHOS_SEM_FALA_FILE = BASE_DIR / "trechos_sem_fala.json"
+PAUSA_YOUTUBE_FILE = BASE_DIR / "pausa_youtube.json"
 
 # Padrão dark de cada canal em cada ciclo, que reinicia às 05:00: 1 vídeo longo e 2 Shorts (as "3 estrelas" do painel).
 # Canais dark grandes publicam pouco e todo dia. Muitos vídeos parecidos por dia é o que o YouTube trata como

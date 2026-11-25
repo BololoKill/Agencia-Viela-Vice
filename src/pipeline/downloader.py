@@ -168,7 +168,18 @@ def _baixar_parte(url: str, destino_dir: Path, rotulo: str, formato: str, inicio
     faixa, nome = ("video", "A imagem") if rotulo == "imagem" else ("audio", "O som")
     medida = 0.0
     for tentativa in range(1, TENTATIVAS_TRECHO + 1):
-        parte = _descer(url, destino_dir, rotulo, formato, inicio, duracao)
+        try:
+            parte = _descer(url, destino_dir, rotulo, formato, inicio, duracao)
+        except yt_dlp.utils.DownloadError as e:
+            # Regressão: o FFmpeg caiu no meio do trecho do alanzoka com um código de saída sem sentido (25/11).
+            # Bloqueio anti-robô, limite de requisições e vídeo indisponível sobem como estão, para o ciclo tratar.
+            if "ffmpeg exited with code" not in str(e):
+                raise
+            if tentativa == TENTATIVAS_TRECHO:
+                raise DownloadIncompleto(f"{nome} do trecho parou no meio do download duas vezes; "
+                                         "o vídeo fica para o próximo ciclo.") from e
+            log_terminal(f"[AVISO] {nome} do trecho parou no meio do download (o FFmpeg caiu): baixando de novo.")
+            continue
         medida = _duracoes(parte).get(faixa, 0.0)
         if medida >= duracao * COBERTURA_MINIMA:
             return parte

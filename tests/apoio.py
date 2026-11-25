@@ -47,6 +47,7 @@ class AmbienteIsolado(unittest.TestCase):
             (cota, "COTAS_FILE", self.raiz / "cotas_youtube.json"),
             (renderer, "VIDEO_BRUTO_DIR", self.bruto_dir),
             (searcher, "HISTORICO_FILE", self.historico_file),
+            (searcher, "PAUSA_YOUTUBE_FILE", self.raiz / "pausa_youtube.json"),
             (web, "EXPORT_DIR", self.export_dir),
             (web, "VIDEO_BRUTO_DIR", self.bruto_dir),
             (web, "AGENDADOS_FILE", self.agendados_file),

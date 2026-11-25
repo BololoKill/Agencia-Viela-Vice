@@ -32,6 +32,30 @@ class TestDecisao(AmbienteIsolado):
     def test_outro_jogo_e_recusado_mesmo_com_titulo_de_gta_6(self):
         self.assertFalse(self._conferir({"jogo": "Terror", "tem_jogo_na_tela": True, "e_gta6": False, "confianca": 0.95}))
 
+    def test_gta_v_nao_descarta_o_video(self):
+        """Regressão: o mesmo trecho do Paulinho o Loko saiu como GTA VI duas vezes e como GTA V na terceira (25/11)."""
+        for jogo in ("Grand Theft Auto V", "GTA V", "GTA 5", "gta5", "Grand Theft Auto V Online"):
+            with self.subTest(jogo=jogo):
+                self.assertTrue(self._conferir({"jogo": jogo, "tem_jogo_na_tela": True, "e_gta6": False, "confianca": 0.95}))
+
+    def test_outros_jogos_continuam_recusados(self):
+        for jogo in ("Far Cry 6", "Red Dead Redemption 2", "Cyberpunk 2077"):
+            with self.subTest(jogo=jogo):
+                self.assertFalse(self._conferir({"jogo": jogo, "tem_jogo_na_tela": True, "e_gta6": False, "confianca": 0.95}))
+        self.assertTrue(self._conferir({"jogo": "Grand Theft Auto VI", "tem_jogo_na_tela": True, "e_gta6": True,
+                                        "confianca": 0.95}))
+
+    def test_registro_diz_qual_modelo_respondeu(self):
+        cliente = mock.Mock()
+        cliente.models.generate_content.return_value = mock.Mock(
+            text='{"jogo": "Grand Theft Auto VI", "tem_jogo_na_tela": true, "e_gta6": true, "confianca": 0.9}')
+        with mock.patch.object(verificador, "_chave_da_ia", return_value="chave-de-teste"), \
+                mock.patch.object(verificador.genai, "Client", return_value=cliente), \
+                mock.patch.object(verificador, "extrair_quadros", return_value=[COLORIDO] * 3), \
+                mock.patch.object(verificador, "log_terminal") as log:
+            self.assertTrue(verificador.confere_gta6("live.mp4"))
+        self.assertIn(verificador.VIDEO_SPECS["modelos_visao"][0], log.call_args.args[0])
+
     def test_gta_6_na_tela_e_aprovado(self):
         self.assertTrue(self._conferir({"jogo": "GTA VI", "tem_jogo_na_tela": True, "e_gta6": True, "confianca": 0.9}))
 

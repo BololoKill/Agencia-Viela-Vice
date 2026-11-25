@@ -99,8 +99,8 @@ class TestFalaEmPortugues(unittest.TestCase):
 
     def test_gameplay_com_pouca_fala_ainda_gera_corte(self):
         """Regressão: em live de ação o streamer fala pouco e nenhum Short era produzido."""
-        esparsas = [seg(i * 20.0, i * 20.0 + 5.0, "olha a polícia correndo aqui mano") for i in range(6)]
-        cortes = edicao.selecionar_melhores_cortes(esparsas, duracao_alvo=66, max_cortes=1)
+        esparsas = [seg(i * 12.0, i * 12.0 + 5.0, "olha a polícia correndo aqui mano") for i in range(10)]
+        cortes = edicao.selecionar_melhores_cortes(esparsas, duracao_alvo=55, max_cortes=1)
         self.assertEqual(len(cortes), 1)
         self.assertGreaterEqual(len(cortes[0][2]), 4)
 
@@ -198,6 +198,26 @@ class TestGancho(unittest.TestCase):
     def test_sem_fala_usa_o_nome_do_streamer(self):
         self.assertIn("DAVY JONES", edicao.gerar_gancho([], "Davy Jones (Gameplayrj)"))
 
+    def test_titulo_termina_no_fim_da_frase(self):
+        """Regressão: o título saiu 'A POLÍCIA JÁ ESTÁ AQUI. ME', com o começo da frase seguinte."""
+        gancho = edicao.gerar_gancho([seg(0, 5, "A polícia já está aqui. Me deixa sair daqui, cara!")], "Autoridade Tech")
+        self.assertEqual(gancho, "A POLÍCIA JÁ ESTÁ AQUI")
+
+    def test_titulo_nao_termina_em_palavra_solta(self):
+        for texto, esperado in (("a polícia pegou o carro do cara na praia", "A POLÍCIA PEGOU O CARRO"),
+                                ("eu vou fugir da polícia com o carro", "EU VOU FUGIR DA POLÍCIA")):
+            with self.subTest(texto=texto):
+                self.assertEqual(edicao.gerar_gancho([seg(0, 5, texto)], "Luqueta"), esperado)
+
+    def test_frase_de_tres_palavras_nao_vira_titulo_solto(self):
+        """Regressão: saiu o título 'SE O GTA'."""
+        gancho = edicao.gerar_gancho([seg(0, 5, "Se o GTA. Seis lançou hoje e tá muito bom")], "Luqueta")
+        self.assertGreaterEqual(len(gancho.split()), 4, gancho)
+
+    def test_frase_curta_demais_usa_o_texto_seguinte(self):
+        gancho = edicao.gerar_gancho([seg(0, 5, "Caramba! A polícia pegou ele na fuga")], "Luqueta")
+        self.assertTrue(gancho.startswith("CARAMBA! A POLÍCIA"), gancho)
+
     def test_quebra_em_ate_duas_linhas(self):
         linhas = edicao.quebrar_linhas("A POLÍCIA PEGOU ELE NA FUGA", max_chars=16)
         self.assertLessEqual(len(linhas), 2)
@@ -231,34 +251,58 @@ class TestMelhoresCortes(unittest.TestCase):
         self.assertEqual(edicao.selecionar_melhores_cortes([seg(0, 5, "oi")], duracao_alvo=60), [])
 
 
-class TestVideosLongos(unittest.TestCase):
+class TestTopDaSemana(unittest.TestCase):
+    """O longo é uma compilação: um trecho de cada vídeo viral, escolhido pela fala mais intensa."""
 
-    def test_gravacao_de_21_minutos_rende_duas_partes_de_10(self):
-        partes = edicao.planejar_longos(1260.0)
-        self.assertEqual(len(partes), 2)
-        self.assertTrue(all(duracao == 600.0 for _, duracao in partes))
-        self.assertLessEqual(partes[0][0] + partes[0][1], partes[1][0])
-        self.assertLessEqual(partes[1][0] + partes[1][1], 1260.0)
+    def _video(self):
+        calmo = [seg(float(t), t + 9.0, "calma aqui") for t in range(0, 180, 10)]
+        quente = [seg(float(t), t + 9.0, "polícia correndo tiro fuga treta agora corre vai vai!") for t in range(180, 300, 10)]
+        final = [seg(float(t), t + 9.0, "calma aqui") for t in range(300, 360, 10)]
+        return calmo + quente + final
 
-    def test_gravacao_media_rende_uma_parte(self):
-        self.assertEqual(len(edicao.planejar_longos(700.0)), 1)
+    def test_escolhe_o_trecho_mais_intenso(self):
+        inicio, fim, falas = edicao.melhor_trecho(self._video(), 100.0)
+        self.assertGreaterEqual(inicio, 150.0)
+        self.assertLessEqual(inicio, 200.0)
+        self.assertGreaterEqual(fim - inicio, 100.0)
+        self.assertTrue(any("polícia" in f["text"] for f in falas))
 
-    def test_gravacao_curta_nao_rende_video_longo(self):
-        self.assertEqual(edicao.planejar_longos(300.0), [])
+    def test_nao_corta_a_frase_no_meio(self):
+        falas = [seg(float(t), t + 9.6, "polícia correndo tiro fuga treta") for t in range(0, 360, 10)]
+        inicio, fim, _ = edicao.melhor_trecho(falas, 100.0)
+        self.assertFalse(any(s["start"] < fim < s["end"] for s in falas), "o trecho acaba no meio de uma frase")
+        self.assertLessEqual(fim - inicio, 100.0 * edicao.FOLGA_FIM_DA_FRASE)
 
-    def test_respeita_a_quantidade_de_vagas(self):
-        self.assertEqual(len(edicao.planejar_longos(7200.0, quantidade=1)), 1)
+    def test_tela_preta_fica_fora_do_trecho(self):
+        inicio, fim, _ = edicao.melhor_trecho(self._video(), 100.0, bloqueios=[(170.0, 175.0)])
+        self.assertTrue(fim <= 170.0 or inicio >= 175.0)
+
+    def test_trecho_nunca_passa_do_fim_do_video(self):
+        inicio, fim, _ = edicao.melhor_trecho(self._video(), 100.0, fim_maximo=250.0)
+        self.assertLessEqual(fim, 250.0)
+
+    def test_video_com_pouca_fala_nao_rende_trecho(self):
+        falas = [seg(0.0, 5.0, "oi"), seg(200.0, 205.0, "tchau")]
+        self.assertIsNone(edicao.melhor_trecho(falas, 100.0))
 
     def test_tela_preta_sai_do_video_longo(self):
         trechos = edicao.trechos_sem_bloqueios(100.0, 600.0, [(200.0, 210.0)])
         self.assertEqual(trechos, [(100.0, 200.0), (210.0, 700.0)])
 
-    def test_publicacao_longa_nao_e_marcada_como_short(self):
-        dados = edicao.montar_publicacao_longa("Davy Jones (Gameplayrj)", 2)
+    FONTES = [{"streamer": "Davy Jones (Gameplayrj)", "url": "https://www.youtube.com/watch?v=a"},
+              {"streamer": "Alanzoka", "url": "https://www.youtube.com/watch?v=b"}]
+
+    def test_publicacao_do_top_nao_e_marcada_como_short(self):
+        dados = edicao.montar_publicacao_compilacao(self.FONTES)
         self.assertNotIn("#Shorts", dados["titulo"] + dados["descricao"])
-        self.assertIn("Parte 2", dados["titulo"])
-        self.assertIn("Créditos: Live de Davy Jones", dados["descricao"])
+        self.assertEqual(dados["titulo"], "TOP 2 momentos mais virais de GTA 6 da semana")
         self.assertLessEqual(len(dados["titulo"]), 98)
+
+    def test_top_credita_cada_criador_com_o_link_do_video(self):
+        d = edicao.montar_publicacao_compilacao(self.FONTES)["descricao"]
+        self.assertIn("1. Davy Jones — https://www.youtube.com/watch?v=a", d)
+        self.assertIn("2. Alanzoka — https://www.youtube.com/watch?v=b", d)
+        self.assertNotIn("Live de", d)
 
 
 class TestPublicacao(unittest.TestCase):
@@ -267,11 +311,66 @@ class TestPublicacao(unittest.TestCase):
         dados = edicao.montar_publicacao("A POLÍCIA PEGOU ELE", "Davy Jones (Gameplayrj)")
         self.assertLessEqual(len(dados["titulo"]), 98)
         self.assertIn("#Shorts", dados["titulo"])
-        self.assertIn("Créditos: Live de Davy Jones", dados["descricao"])
+        self.assertIn("Créditos: vídeo de Davy Jones", dados["descricao"])
+
+    def test_credito_traz_o_link_do_video_original(self):
+        d = edicao.montar_publicacao("X", "Alanzoka", url="https://www.youtube.com/watch?v=b")["descricao"]
+        self.assertIn("Créditos: vídeo de Alanzoka — https://www.youtube.com/watch?v=b", d)
 
     def test_hashtags_variam_entre_videos(self):
         descricoes = {edicao.montar_publicacao("X", "Luqueta", semente=i)["descricao"] for i in range(4)}
         self.assertGreater(len(descricoes), 1)
+
+    def test_hashtags_nao_falam_mais_de_live_nem_de_gta_rp(self):
+        for hashtags in edicao.HASHTAGS_ROTATIVAS:
+            self.assertNotIn("Live", hashtags)
+            self.assertNotIn("GTARP", hashtags)
+
+
+class TestDescricaoDoCanalDark(unittest.TestCase):
+
+    CAPITULOS = [(0.0, "O controle quase descarrega, a mira falha e tudo dá errado."),
+                 (85.0, "Bota fogo em tudo e tenta entender a treta."), (170.5, "Cuidado com o avião, meu parceiro!")]
+    FONTES = [{"streamer": f"Criador {i}", "url": f"https://www.youtube.com/watch?v={i}"} for i in range(3)]
+
+    def test_top_traz_capitulos_com_horario(self):
+        d = edicao.montar_publicacao_compilacao(self.FONTES, titulo_roteiro="Caos total", resumo="Hoje foi pura loucura.",
+                                                capitulos=self.CAPITULOS)["descricao"]
+        self.assertTrue(d.startswith("Hoje foi pura loucura."))
+        self.assertIn("00:00 O controle quase descarrega, a mira", d)
+        self.assertIn("01:25 Bota fogo em tudo e tenta", d)
+        self.assertIn("02:50 Cuidado com o avião, meu parceiro", d)
+
+    def test_poucos_capitulos_nao_viram_lista(self):
+        d = edicao.montar_publicacao_compilacao(self.FONTES, capitulos=self.CAPITULOS[:2])["descricao"]
+        self.assertNotIn("00:00", d)
+
+    def test_short_abre_a_descricao_com_a_narracao(self):
+        d = edicao.montar_publicacao("A FUGA", "Alanzoka", resumo="Ele achou que ia escapar.")["descricao"]
+        self.assertTrue(d.startswith("Ele achou que ia escapar."))
+
+
+class TestPadraoDeMonetizacao(unittest.TestCase):
+    """Shorts entre 45 e 60 segundos; longos com pelo menos 8 minutos, o mínimo para anúncios no meio do vídeo."""
+
+    INTRO_MIN_S = 2.5
+    INTRO_MAX_S = 3.5
+
+    def test_short_completo_fica_entre_45_e_60_segundos(self):
+        from src.config import VIDEO_SPECS
+        self.assertEqual((VIDEO_SPECS["duracao_min_shorts"], VIDEO_SPECS["duracao_max_shorts"]), (45.0, 60.0))
+        self.assertLessEqual(VIDEO_SPECS["duracao_conteudo_s"] + self.INTRO_MAX_S, 60.0)
+        self.assertGreaterEqual(edicao.DURACAO_MINIMA_CORTE_S + self.INTRO_MIN_S, 45.0)
+
+    def test_longo_passa_de_8_minutos_sem_exagerar(self):
+        from src.config import VIDEO_SPECS
+        self.assertGreaterEqual(VIDEO_SPECS["duracao_minima_longo_s"], 480.0)
+        self.assertLessEqual(VIDEO_SPECS["duracao_longo_s"], 540.0)
+        self.assertGreaterEqual(VIDEO_SPECS["duracao_longo_s"], VIDEO_SPECS["duracao_minima_longo_s"])
+
+    def test_fala_curta_demais_nao_vira_short(self):
+        falas = [seg(i * 3.0, i * 3.0 + 2.5, "a polícia chegou mano") for i in range(12)]  # 30 s de fala
+        self.assertEqual(edicao.selecionar_melhores_cortes(falas, duracao_alvo=55.0, max_cortes=2), [])
 
 
 if __name__ == "__main__":

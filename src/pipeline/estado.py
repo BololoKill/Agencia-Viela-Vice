@@ -9,7 +9,9 @@ import time
 from datetime import datetime
 import psutil
 from src.config import STATUS_VIGIA_FILE, TRAVA_CICLO_FILE, FALHAS_FILE, CONTROLE_PRODUCAO_FILE
+from src.pipeline.downloader import DownloadIncompleto, GravacaoTravada
 from src.pipeline.ffmpeg_runner import FFmpegError
+from src.pipeline.roteiro import IaDeRoteiroFora, SemRoteiro
 from src.utils import load_json_safe, save_json_safe
 
 LIMITE_TRAVADO_S = 180
@@ -43,6 +45,14 @@ def classificar_erro(erro: Exception) -> dict:
 
     if isinstance(erro, FFmpegError):
         return resultado("render", f"Falha no editor: {erro}", False, 60)
+    if isinstance(erro, IaDeRoteiroFora):
+        return resultado("ia_roteiro", f"{erro} A produção espera a IA voltar.", True, 300)
+    if isinstance(erro, SemRoteiro):
+        return resultado("sem_roteiro", f"{erro} Sem narração própria o vídeo não entra no canal.", True, 60)
+    if isinstance(erro, DownloadIncompleto):
+        return resultado("download_incompleto", str(erro), True, 60)
+    if isinstance(erro, GravacaoTravada):
+        return resultado("gravacao_travada", f"{erro} Esse vídeo fica de fora por 30 min.", True, 30)
     if "429" in texto or "too many requests" in texto:
         return resultado("rate_limit", "YouTube limitou as requisições (HTTP 429).", True, 900)
     if "not a bot" in texto or "sign in to confirm" in texto:
@@ -190,6 +200,7 @@ def ler_status() -> dict:
         "erro": erro,
         "atualizado_em": dados.get("atualizado_em", ""),
         "proxima_tentativa_em": dados.get("proxima_tentativa_em"),
+        "virais": dados.get("virais") if isinstance(dados.get("virais"), list) else [],
     }
 
 

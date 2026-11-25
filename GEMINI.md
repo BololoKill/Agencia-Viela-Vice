@@ -38,14 +38,16 @@ Com base na análise dos vídeos de referência (`3yGYehFfUP8` e `zrre7u9a6qM`),
 
 ## Regras Avançadas, Segurança e Transparência - Canal Viela Vice
 
-1. **Velocidade:** Uso do modelo `--model base` do Whisper para transcrição rápida em notebooks.
-2. **Proteção Contra Strike (Monetização):** Inclusão automática de créditos (`"Créditos: Live de [Nome do Streamer]"`) e variação rotativa de hashtags para evitar detecção de spam.
+1. **Transcrição:** Whisper `small`, só nos 6 minutos baixados de cada vídeo viral.
+2. **Proteção Contra Strike (Monetização):** Inclusão automática de créditos (`"Créditos: vídeo de [criador] — [link do vídeo original]"`) e variação rotativa de hashtags para evitar detecção de spam.
 3. **Segurança da API & Limite de Estoque (Rate Limiting & Storage):**
-   - **Gerenciamento via `painel.py`:** Limitar o envio a no máximo 6 vídeos por dia (4 Shorts + 2 Vídeos Longos), espaçados por intervalos de 3 horas.
-   - **Limite de Estoque (2x a Meta Diária = 12 vídeos):** Antes de buscar ou baixar qualquer nova live, o sistema (`robo_cortes.py` e `vigia_lives.py`) verifica a pasta `exportacao`. Se já houver 12 ou mais vídeos `.mp4` prontos aguardando revisão, a criação é pausada imediatamente para evitar acúmulo no disco, retomando apenas quando o estoque cair abaixo de 12.
+   - **Padrão dark de publicação:** a agência publica num canal só (o principal). Por ciclo (que reinicia às 05:00) ele recebe 1 vídeo longo publicado às 17:00 e 2 Shorts publicados às 12:00 e às 19:00. A Diretoria bloqueia o 2º longo e o 3º Short do dia.
+   - **Matéria-prima:** não se gravam mais lives. A busca pega os vídeos de GTA 6 em português mais vistos da semana (um por criador, com pelo menos 8 min) e baixa só 6 min de cada. Cada vídeo rende no máximo 1 Short e 1 trecho do Top 5 da semana, com crédito e link na descrição e o nome do criador na tela. Volume alto de vídeos parecidos é tratado pelo YouTube como conteúdo produzido em massa e pode tirar a monetização do canal inteiro.
+   - **Download do trecho:** a imagem e o som descem separados e são juntados sem recodificar. Se o YouTube derruba a conexão, o FFmpeg continua de onde parou; a parte que chega cortada é baixada de novo sozinha (o som leva segundos, a imagem leva minutos). Um trecho já conferido sem fala do criador em português fica guardado por 30 dias e não é baixado de novo. Os downloads e os arquivos temporários ficam no SSD (`D:/VielaVice`), poupando o HD do Windows.
+   - **Limite de Estoque (3 dias de publicação = 9 vídeos):** Antes de buscar ou baixar qualquer vídeo viral, o robô (`src/pipeline/worker.py`) verifica a pasta `exportacao`. Com 6 Shorts e 3 longos prontos esperando a Diretoria, a produção pausa e só volta quando o estoque baixar.
 4. **Descoberta Dinâmica & Limpeza:** Monitoramento de novos criadores (`streamers_descobertos.json`) e limpeza automática da pasta `video-bruto`.
 5. **Transparência Total (Afiliados e Cupons):** O `painel.py` gerencia links de afiliado e cupons gamer, incluindo automaticamente o aviso de transparência no final da descrição: `"Transparência: Links de afiliado oficiais. Comprando por aqui você apoia o canal sem pagar nada a mais."`.
-6. **Áudio e Narração sem Sobreposição:** Nos vídeos, nunca coloque narração do edge-tts falando por cima da voz do streamer. O contexto é narrado em um intro com o primeiro quadro congelado (zoom leve e fundo escuro), liberando depois o áudio 100% limpo do streamer (baixando apenas a faixa de áudio principal para evitar dublagens automáticas).
+6. **Canal dark com narração própria:** cada vídeo ganha roteiro escrito pela IA a partir da transcrição (título, gancho e narração). No Short, a narração do roteiro abre o vídeo sobre o jogo; o longo é o Top 5 da semana, em contagem regressiva, com abertura narrada e o narrador apresentando cada trecho (som do jogo abaixado para 18%, fala do narrador e nome do criador escritos na tela). Não existe mais o formato antigo: sem roteiro válido o vídeo não é feito, e com a IA fora do ar a produção espera ela voltar, sem baixar nada. A Diretoria recusa vídeo sem narração própria.
 7. **CTA Final Obrigatório:** Nos últimos 4 segundos de todos os Shorts (66s a 70s), o áudio `exportacao/cta.mp3` (gerado via edge-tts `pt-BR-AntonioNeural` com rate `+15%` falando *"Se você curtiu o vídeo, já deixa o like e se inscreva no canal!"*) entra com o som do jogo reduzido a 10% e o banner vermelho na tela `"CURTA E SE INSCREVA NO VIELA VICE!"`. As legendas são ocultadas nesses últimos 4 segundos (limite de corte em 66s) para evitar sobreposição.
 8. **Estética Híbrida Viela Vice & Qualidade Máxima sem Pressa:**
    - **Base Visual:** Vídeo central nítido com fundo blur escuro, título no topo (sempre uma frase curta e chamativa baseada no momento do vídeo, nunca genérica) e encerramento com `exportacao/cta.mp3`.
@@ -62,9 +64,17 @@ Com base na análise dos vídeos de referência (`3yGYehFfUP8` e `zrre7u9a6qM`),
 - **Horários de Pico:** Priorizar agendamentos nos horários de maior retenção (18:00 e 21:00).
 
 
-## NOVA ESTRUTURA DE PRODUCAO E SETOR DE CURADORIA (60 VIDEOS)
-- META DE ESTOQUE TOTAL: ate 60 videos prontos na fila (40 Shorts e 20 videos longos).
-- SETOR DE CONTROLE DE QUALIDADE & CURADORIA (LIDER DE REUNIOES):
-  1. Audita automaticamente 100% dos videos gerados antes de chegarem ao Gerente (checando codec yuv420p, audio sem falhas, idioma pt-BR, censura e duracao). Videos com bugs sao apagados automaticamente.
-  2. Ranqueia os videos aprovados na auditoria e entrega ao Gerente apenas o TOP 6 DO DIA (2 Longos + 4 Shorts com maior potencial de retencao).
-  3. Lidera as reunioes periodicas da agencia, ditando melhorias de automacao e atualizando as diretrizes da equipe conforme o desempenho.
+## Equipe da agência: cada pessoa do escritório é uma etapa da produção
+
+No escritório só ficam as 8 pessoas da equipe; os figurantes de volume saíram. Quando uma etapa começa, quem cuida dela fala no escritório e aparece em "Produção agora". O botão "Equipe e funções" do painel explica tudo ao dono.
+
+1. **Bruno (Olheiro de Virais):** busca os vídeos de GTA 6 em português mais vistos da semana, com pelo menos 100 mil visualizações e um por criador.
+2. **Caio (T.I. e Downloads):** baixa só 6 minutos de cada vídeo viral e cuida do disco e do Suporte T.I.
+3. **Camila (Curadoria e Auditoria):** confere com a IA de imagem se é mesmo GTA 6 e audita cada vídeo pronto (imagem, som e sincronia) antes da Diretoria. Vídeo com defeito é apagado.
+4. **Thiago (Roteirista e Narrador):** transcreve a fala do criador e escreve com a IA o título, o gancho e a narração. Sem narração própria nenhum vídeo é feito.
+5. **Lucas (Editor de Shorts):** monta um Short de 45 a 60 segundos por vídeo viral.
+6. **Mariana (Editora do Top 5):** monta o vídeo longo "Top 5 da semana", de 8min30, em contagem regressiva e com o nome de cada criador na tela.
+7. **Dr. Ricardo (Diretoria):** é a aprovação do dono. Nada vai ao YouTube sem ela, e o que for rejeitado é apagado.
+8. **Beatriz (Publicação e Horários):** agenda o que foi aprovado: 1 longo às 17:00 e 2 Shorts, às 12:00 e às 19:00.
+
+O Gordão é o mascote da Green Room e não tem etapa na produção.

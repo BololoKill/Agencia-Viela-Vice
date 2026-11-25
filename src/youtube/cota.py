@@ -2,21 +2,38 @@
 Controle da cota de envios por canal.
 O YouTube é a fonte da verdade: cada ciclo vai das 05:00 às 05:00 e nunca reinicia antes disso.
 Sem confirmação da cota, nenhum envio é liberado.
+No padrão dark cada canal recebe, por ciclo, 1 vídeo longo e 2 Shorts.
 """
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from googleapiclient.discovery import build
-from src.config import CANAIS_VIELA_VICE, COTAS_FILE, COTA_DIARIA_CANAL, HORA_REINICIO_COTA
+from src.config import CANAIS_VIELA_VICE, COTAS_FILE, COTA_DIARIA_CANAL, COTA_POR_TIPO, HORA_REINICIO_COTA
 from src.utils import load_json_safe, log_terminal, save_json_safe
 from src.youtube.auth import obter_credenciais
 
 INTERVALO_SINCRONIZACAO_S = 3600
 MAXIMO_PAGINAS = 3
 MAXIMO_ANTERIORES = 200
+NOMES_DO_TIPO = {"longo": "vídeo longo", "short": "Shorts"}
 
 _trava = threading.RLock()
-_reservas = {}
+_reservas = {}  # Vagas em uso por canal e por (canal, tipo) enquanto o envio acontece
+
+
+def tipo_do_video(nome: str) -> str:
+    """Os vídeos longos começam com 'longo-'; os demais são Shorts."""
+    return "longo" if str(nome).startswith("longo-") else "short"
+
+
+def _tipos(registro: dict) -> dict:
+    return registro.get("tipos") if isinstance(registro.get("tipos"), dict) else {}
+
+
+def _usados_do_tipo(registro: dict, tipo: str) -> int:
+    """Envios do tipo feitos pelo painel no ciclo. Os feitos fora dele contam só no total do canal."""
+    tipos = _tipos(registro)
+    return sum(1 for video in set(registro.get("videos") or []) if tipos.get(video) == tipo)
 
 
 class CotaEsgotada(RuntimeError):
@@ -132,15 +149,18 @@ def resumo(agora: datetime = None) -> dict:
             saida[canal_id] = {
                 "usados": usados,
                 "limite": COTA_DIARIA_CANAL,
-                "bloqueado": api_esgotada or usados >= COTA_DIARIA_CANAL,
+                "por_tipo": {tipo: {"usados": _usados_do_tipo(registro, tipo), "limite": limite}
+                             for tipo, limite in COTA_POR_TIPO.items()},
+                "bloqueado": api_esgotada or bool(registro.get("limite_youtube")) or usados >= COTA_DIARIA_CANAL,
+                "limite_youtube": bool(registro.get("limite_youtube")),
                 "verificado": bool(registro.get("verificado_em")),
                 "verificado_em": registro.get("verificado_em"),
             }
         return saida
 
 
-def reservar_envio(canal_id: str):
-    """Confirma a cota no YouTube e reserva uma vaga antes de iniciar o envio."""
+def reservar_envio(canal_id: str, tipo: str = None):
+    """Confirma a cota no YouTube e reserva uma vaga, do canal e do tipo do vídeo, antes de iniciar o envio."""
     try:
         sincronizar_canal(canal_id)
     except Exception as e:
@@ -148,22 +168,36 @@ def reservar_envio(canal_id: str):
 
     with _trava:
         dados = _carregar()
-        usados = len(set(_canal(dados, canal_id)["videos"]))
+        registro = _canal(dados, canal_id)
+        usados = len(set(registro["videos"]))
         if dados.get("api_esgotada"):
             raise CotaEsgotada("Cota da API do YouTube esgotada. Novos envios liberam às 05:00.")
+        if registro.get("limite_youtube"):
+            raise CotaEsgotada("O YouTube atingiu o limite de envios deste canal hoje. Use outro canal; este libera às 05:00.")
         if usados + _reservas.get(canal_id, 0) >= COTA_DIARIA_CANAL:
             raise CotaEsgotada(f"Canal com {usados}/{COTA_DIARIA_CANAL} estrelas. Novos envios liberam às 05:00.")
+        if tipo in COTA_POR_TIPO:
+            do_tipo = _usados_do_tipo(registro, tipo) + _reservas.get((canal_id, tipo), 0)
+            if do_tipo >= COTA_POR_TIPO[tipo]:
+                raise CotaEsgotada(
+                    f"Padrão dark: o canal já recebeu {do_tipo}/{COTA_POR_TIPO[tipo]} {NOMES_DO_TIPO[tipo]} hoje. "
+                    "Novos envios desse tipo liberam às 05:00.")
+            _reservas[(canal_id, tipo)] = _reservas.get((canal_id, tipo), 0) + 1
         _reservas[canal_id] = _reservas.get(canal_id, 0) + 1
 
 
-def concluir_envio(canal_id: str, video_id: str = None):
-    """Libera a reserva e registra imediatamente o vídeo enviado."""
+def concluir_envio(canal_id: str, video_id: str = None, tipo: str = None):
+    """Libera a reserva e registra imediatamente o vídeo enviado, com o tipo dele."""
     with _trava:
         _reservas[canal_id] = max(0, _reservas.get(canal_id, 0) - 1)
+        if tipo in COTA_POR_TIPO:
+            _reservas[(canal_id, tipo)] = max(0, _reservas.get((canal_id, tipo), 0) - 1)
         if video_id:
             dados = _carregar()
             registro = _canal(dados, canal_id)
             registro["videos"] = sorted(set(registro["videos"]) | {video_id})
+            if tipo:
+                registro["tipos"] = {**_tipos(registro), video_id: tipo}
             save_json_safe(COTAS_FILE, dados)
 
 
@@ -174,6 +208,15 @@ def marcar_api_esgotada():
         dados["api_esgotada"] = True
         save_json_safe(COTAS_FILE, dados)
     log_terminal("[AVISO] YouTube informou cota esgotada. Envios bloqueados até as 05:00.")
+
+
+def marcar_canal_no_limite(canal_id: str, agora: datetime = None):
+    """O YouTube tem um limite próprio por canal, às vezes menor que o nosso: trava só esse canal até as 05:00."""
+    with _trava:
+        dados = _carregar(agora)
+        _canal(dados, canal_id)["limite_youtube"] = True
+        save_json_safe(COTAS_FILE, dados)
+    log_terminal(f"[AVISO] O YouTube recusou novos envios no canal {canal_id} hoje. Esse canal fica travado até as 05:00.")
 
 
 def _monitorar():

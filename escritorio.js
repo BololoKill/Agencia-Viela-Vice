@@ -136,17 +136,6 @@ movel('prancha', 0, 5, 1, 1, { cor: CORES.ciano });
 movel('planta', 0, 15, 1, 1);
 movel('planta', 17, 12, 1, 1);
 
-// Figurantes que dão vida ao escritório e ocupam o próprio lugar no piso
-movel('npc', 12, 1, 1, 1, { id: 'barista' });
-movel('npc', 16, 1, 1, 1, { id: 'seguranca' });
-movel('npc', 33, 1, 1, 1, { id: 'barman', quadros: ['servir1', 'servir2'] });
-movel('npc', 29, 7, 1, 1, { id: 'sinuca1', quadros: ['sinuca1', 'sinuca1', 'sinuca2'] });
-movel('npc', 34, 3, 1, 1, { id: 'sinuca2', quadros: ['beber2', 'beber2', 'beber1'] });
-movel('npc', 44, 6, 1, 1, { id: 'dj', quadros: ['dj1', 'dj2'] });
-movel('npc', 41, 6, 1, 1, { id: 'dancarina', quadros: ['dj2', 'dj1'] });
-movel('npc', 46, 3, 1, 1, { id: 'poker1', quadros: ['jogar1', 'jogar2'] });
-movel('npc', 48, 3, 1, 1, { id: 'poker2', quadros: ['jogar2', 'jogar1'], virado: true });
-
 // Terraço com piscina em frente ao escritório
 var EXTERNOS = [];
 
@@ -170,21 +159,6 @@ externo('palmeira', -6, 29, 1, 1);
 externo('guardaSol', -1, 29, 1, 1, { cor: CORES.amarelo });
 externo('espreguicadeira', 0.4, 30, 2, 1);
 
-var PASSANTES = [
-  { id: 'p1', nivel: 'terraco', rota: [[2.5, 24.8], [15.5, 24.8]], vel: 0.9 },
-  { id: 'p2', nivel: 'terraco', rota: [[5.3, 26.2], [5.3, 30.4]], vel: 0.7 },
-  { id: 'p3', nivel: 'terraco', rota: [[15.6, 26], [15.6, 29.4]], vel: 0.8 },
-  { id: 'p4', nivel: 'terraco', rota: [[8.2, 32.4]] },
-  { id: 'p5', nivel: 'terraco', rota: [[12.6, 31.8]], virado: true },
-  { id: 'p6', nivel: 'terraco', rota: [[10.5, 30.7]] },
-  { id: 'p7', nivel: 'terraco', rota: [[-4, 31.5], [1, 28]], vel: 0.7 },
-  { id: 'p8', nivel: 'terraco', rota: [[3, 34], [7, 34]], vel: 0.8 },
-  { id: 'm1', nivel: 'mezanino', rota: [[15, 2.2], [31, 2.2]], vel: 0.8 },
-  { id: 'm2', nivel: 'mezanino', rota: [[37, 2.2], [24, 2.2]], vel: 0.6 },
-  { id: 'm3', nivel: 'mezanino', rota: [[20, 1.6]] },
-  { id: 'm4', nivel: 'mezanino', rota: [[21.2, 1.6]], virado: true }
-];
-
 var bloqueadas = {};
 MOVEIS.forEach(function(m) {
   for (var c = m.c; c < m.c + m.l; c++) {
@@ -192,16 +166,31 @@ MOVEIS.forEach(function(m) {
   }
 });
 
+// Cada pessoa da equipe é uma etapa real da produção; o painel explica a função ao clicar nela
 var AGENTES = [
-  { id: 'dr_ricardo', nome: 'Dr. Ricardo', cargo: 'Diretor Geral', assento: [8, 21] },
-  { id: 'camila', nome: 'Camila', cargo: 'Curadoria Top 6', assento: [13, 6] },
-  { id: 'bruno', nome: 'Bruno', cargo: 'Olheiro de Tendências', assento: [6, 10] },
+  { id: 'dr_ricardo', nome: 'Dr. Ricardo', cargo: 'Diretoria (sua aprovação)', assento: [8, 21] },
+  { id: 'camila', nome: 'Camila', cargo: 'Curadoria e Auditoria', assento: [13, 6] },
+  { id: 'bruno', nome: 'Bruno', cargo: 'Olheiro de Virais', assento: [6, 10] },
   { id: 'lucas', nome: 'Lucas', cargo: 'Editor de Shorts', assento: [6, 6] },
-  { id: 'mariana', nome: 'Mariana', cargo: 'Editora de Longos', assento: [6, 14] },
-  { id: 'caio', nome: 'Caio', cargo: 'Líder de T.I.', assento: [13, 14] },
-  { id: 'beatriz', nome: 'Beatriz', cargo: 'Analista de CTR', assento: [20, 4] },
-  { id: 'thiago', nome: 'Thiago', cargo: 'Roteirista', assento: [13, 10] }
+  { id: 'mariana', nome: 'Mariana', cargo: 'Editora do Top 5', assento: [6, 14] },
+  { id: 'caio', nome: 'Caio', cargo: 'T.I. e Downloads', assento: [13, 14] },
+  { id: 'beatriz', nome: 'Beatriz', cargo: 'Publicação e Horários', assento: [20, 4] },
+  { id: 'thiago', nome: 'Thiago', cargo: 'Roteirista e Narrador', assento: [13, 10] }
 ];
+
+// Etapa da produção (texto do painel) -> quem está trabalhando nela
+var TAREFAS = [
+  { padrao: /Buscando os vídeos/i, agente: 'bruno', fala: '🔎 Procurando os vídeos de GTA 6 mais vistos da semana...' },
+  { padrao: /Baixando o trecho/i, agente: 'caio', fala: '⬇️ Baixando só 6 min do vídeo viral, imagem e som separados.' },
+  { padrao: /Conferindo o jogo/i, agente: 'camila', fala: '🔍 Conferindo se é GTA 6 de verdade na imagem.' },
+  { padrao: /Transcrevendo/i, agente: 'thiago', fala: '📝 Ouvindo a fala do criador para escrever o roteiro.' },
+  { padrao: /Esperando a IA/i, agente: 'thiago', fala: '⏳ A IA de roteiro caiu; esperando ela voltar. Sem narração, nada sai.' },
+  { padrao: /Renderizando Short/i, agente: 'lucas', fala: '🎬 Editando o Short: gancho, legenda, narração e marca.' },
+  { padrao: /Montando o Top/i, agente: 'mariana', fala: '🏆 Montando o Top 5 da semana em contagem regressiva.' },
+  { padrao: /Ciclo concluído/i, agente: 'camila', fala: '✅ Auditoria feita: os vídeos novos estão na Diretoria.' },
+  { padrao: /Estoque completo/i, agente: 'dr_ricardo', fala: '🔔 Estoque cheio: aprove ou rejeite os vídeos para a produção voltar.' }
+];
+var ultimaTarefa = '';
 
 var PONTOS = {
   cafe: [[11, 1], [13, 1]],
@@ -212,11 +201,11 @@ var PONTOS = {
 };
 
 var FALAS = {
-  trabalho: ['Foco total neste corte!', 'Conferindo o formato do vídeo.', 'Ajustando o gancho dos 3 segundos.',
-    'Equalizando o áudio do jogo.', 'Revisando as legendas.'],
+  trabalho: ['Escolhendo o melhor momento do vídeo viral.', 'Escrevendo o roteiro do próximo Short.', 'Gravando a narração do canal.',
+    'Conferindo o crédito do criador na descrição.', 'Ajustando o gancho dos 3 segundos.', 'Montando a contagem do Top 5.'],
   cafe: ['☕ Um expresso duplo, por favor!', '☕ Pausa rápida pro café.', '☕ Recarregando as energias.'],
   celular: ['📱 Vendo as métricas do último Short.', '📱 Respondendo o grupo da equipe.', '📱 Olha esse meme de GTA 6!'],
-  conversa: ['Viu o que vazou de GTA 6?', 'Esse corte vai viralizar!', 'Qual foi a retenção de ontem?', 'A live de hoje tá insana!'],
+  conversa: ['Essa narração ficou brabíssima!', 'Esse roteiro vai viralizar!', 'Qual foi a retenção de ontem?', 'Esse vídeo passou de 10 milhões!'],
   danca: ['🕺 Bateu a meta do dia!', '💃 Hoje tem Short viral!'],
   sinuca: ['🎱 Essa bola é minha, parceiro.', '🎱 Mesa boa é mesa ganha.', '🎱 Olha a tacada!'],
   freezer: ['🍺 Bem gelada, do jeito certo.', '🍺 Freezer do patrão nunca fica vazio.'],
@@ -230,14 +219,14 @@ var FALAS = {
 };
 
 var FALAS_REUNIAO = {
-  dr_ricardo: 'Objetivo de hoje: respeitar as 6 estrelas de cada canal!',
-  camila: 'Só passa vídeo com áudio e imagem perfeitos.',
-  thiago: 'Títulos com gancho nos 3 primeiros segundos!',
-  bruno: 'Rastreando lives e vídeos novos de GTA 6.',
-  lucas: 'Shorts verticais com legendas de alta fidelidade.',
-  mariana: 'Narrativa aprovada pela equipe.',
-  caio: 'Hardware e disco monitorados.',
-  beatriz: 'Melhor retenção às 18h e às 21h!'
+  dr_ricardo: 'Nada vai ao ar sem a aprovação da Diretoria.',
+  camila: 'Confiro idioma, jogo e a qualidade de cada vídeo.',
+  thiago: 'Transcrevo, escrevo o roteiro com a IA e narro.',
+  bruno: 'Pego os vídeos de GTA 6 mais vistos da semana.',
+  lucas: 'Shorts de 45 a 60 s, um por vídeo viral.',
+  mariana: 'Top 5 da semana com 8min30 narrados.',
+  caio: 'Baixo só 6 min de cada vídeo e cuido do computador.',
+  beatriz: '1 longo às 17h e 2 Shorts às 12h e às 19h.'
 };
 
 // ---------- Rotas ----------
@@ -687,14 +676,27 @@ function abrirReuniao() {
   AGENTES.forEach(function(ag, ordem) {
     setTimeout(function() { falar(ag, FALAS_REUNIAO[ag.id], 2400, true); }, 7000 + ordem * 2600);
   });
-  verModal('🤝 Reunião Executiva em Andamento', '<div class="card" style="text-align:center;">A equipe executiva está alinhando as diretrizes de produção na sala de reuniões.<br><br><b>Normas em pauta:</b> Sistema 6 Estrelas, Proibição de MoviePy e Qualidade Máxima sem pressa.</div>');
+  if (typeof abrirGuiaDaEquipe === 'function') abrirGuiaDaEquipe(true);
   setTimeout(function() { emReuniao = false; }, 7000 + AGENTES.length * 2600 + 1500);
 }
 
 function abrirPainelDoAgente(id) {
-  if (id === 'camila') abrirCuradoriaTop();
-  else if (id === 'caio' || id === 'beatriz') abrirSuporteTI();
-  else abrirAvaliacao();
+  if (typeof abrirFuncaoDoAgente === 'function') abrirFuncaoDoAgente(id);
+}
+
+// O painel avisa a etapa atual: quem cuida dela conta na hora o que está fazendo
+function anunciarTarefa(etapa) {
+  var tarefa = TAREFAS.filter(function(t) { return t.padrao.test(etapa || ''); })[0];
+  if (!tarefa || etapa === ultimaTarefa) return tarefa ? tarefa.agente : null;
+  ultimaTarefa = etapa;
+  var ag = AGENTES.filter(function(a) { return a.id === tarefa.agente; })[0];
+  if (ag && typeof falar === 'function' && ag.balao !== undefined) falar(ag, tarefa.fala, 6500, true);
+  return tarefa.agente;
+}
+
+function agenteDaEtapa(etapa) {
+  var tarefa = TAREFAS.filter(function(t) { return t.padrao.test(etapa || ''); })[0];
+  return tarefa ? tarefa.agente : null;
 }
 
 // ---------- Desenho ----------
@@ -1334,7 +1336,7 @@ function desenharLetreiros(ctx) {
     textoNeon(ctx, 'ROOM', 37, 35, '800 14px "Segoe UI", Arial, sans-serif', CORES.rosa, 'center');
   });
   noPlanoPrincipal(ctx, 21, 164, function() {
-    textoNeon(ctx, '● AO VIVO', 0, 18, '900 18px "Segoe UI", Arial, sans-serif', '#ff3b3b');
+    textoNeon(ctx, '● VIRAIS', 0, 18, '900 18px "Segoe UI", Arial, sans-serif', '#ff3b3b');
   });
   noPlanoPrincipal(ctx, 28.4, 182, function() {
     folhaNeon(ctx, 84, 36, 24, CORES.verde);
@@ -2086,12 +2088,12 @@ var FIXOS = {
   toca: desenharToca, divisoria: desenharDivisoria, divisoriaLounge: desenharDivisoria, mesaReuniao: desenharMesaReuniao,
   flamingo: desenharFlamingo, prancha: desenharPrancha, lowrider: desenharPlataformaCarro,
   consoleWar: desenharConsoleWar, sofaVip: desenharSofa, poker: desenharPoker, freezer: desenharFreezer, prateleiraBar: desenharPrateleiraBar, balcaoBar: desenharBalcaoBar, banqueta: desenharBanqueta, pebolim: desenharPebolim,
-  npc: function() {}, espreguicadeira: desenharEspreguicadeira, guardaSol: desenharGuardaSol, barTiki: desenharBarTiki
+  espreguicadeira: desenharEspreguicadeira, guardaSol: desenharGuardaSol, barTiki: desenharBarTiki
 };
 var VIVOS = {
   mesa: desenharMesaViva, mesaExecutiva: desenharMesaViva, balcao: desenharBalcaoVivo, rack: desenharRackVivo,
   jukebox: desenharJukeboxViva, caixaSom: desenharCaixaSomViva, lavaLamp: desenharLavaLampViva, toca: desenharTocaViva,
-  mesaReuniao: desenharMesaReuniaoViva, sofa: desenharGordao, lowrider: desenharCarroVivo, npc: desenharNpc, freezer: desenharFreezerVivo, divisoria: desenharDivisoriaViva, consoleWar: desenharConsoleWarVivo
+  mesaReuniao: desenharMesaReuniaoViva, sofa: desenharGordao, lowrider: desenharCarroVivo, freezer: desenharFreezerVivo, divisoria: desenharDivisoriaViva, consoleWar: desenharConsoleWarVivo
 };
 
 function limitesDoMovel(m) {
@@ -2167,7 +2169,7 @@ function desenharPainelDeVideo(ctx) {
     ctx.clip();
     ctx.fillStyle = '#fff';
     ctx.font = '800 11px "Segoe UI", Arial, sans-serif';
-    ctx.fillText('CORTES DE GTA 6  •  VIELA VICE  •  6 ESTRELAS  •  CORTES DE GTA 6', 104 - (cena.tempo * 22) % 300, a - 4);
+    ctx.fillText('GTA 6 NARRADO  •  VIRAIS DA SEMANA  •  TOP 5  •  CANAL DARK', 104 - (cena.tempo * 22) % 300, a - 4);
     ctx.restore();
   });
 }
@@ -2175,62 +2177,6 @@ function desenharPainelDeVideo(ctx) {
 function spriteDoAgente(ag, pose) {
   var img = imagens.poses[ag.id + pose];
   return img && img.complete && img.naturalWidth ? img : null;
-}
-
-function prepararPassante(p) {
-  p.z = p.nivel === 'mezanino' ? Z_MEZANINO : -ALTURA_LAJE;
-  p.c = p.rota[0][0];
-  p.r = p.rota[0][1];
-  p.indice = 1;
-  p.sentido = 1;
-  p.pausa = 0;
-  p.quadro = 3;
-  p.passada = 0;
-  p.salto = 0;
-  p.sentado = false;
-  p.dancando = false;
-  p.esquerda = !!p.virado;
-}
-
-function atualizarPassante(p, segundos) {
-  if (p.rota.length < 2) return;
-  if (p.pausa > 0) {
-    p.pausa -= segundos;
-    p.salto = 0;
-    return;
-  }
-  var alvo = p.rota[p.indice];
-  var dc = alvo[0] - p.c;
-  var dr = alvo[1] - p.r;
-  var distancia = Math.hypot(dc, dr);
-  var passo = (p.vel || 0.8) * segundos;
-  if (Math.abs(dc - dr) > 0.01) p.esquerda = dc - dr < 0;
-  p.passada += Math.min(passo, distancia);
-  if (p.passada >= PASSADA) {
-    p.passada -= PASSADA;
-    p.quadro = p.quadro === 3 ? 4 : 3;
-  }
-  p.salto = Math.abs(Math.sin(p.passada / PASSADA * Math.PI)) * 2.5;
-  if (distancia <= passo) {
-    p.c = alvo[0];
-    p.r = alvo[1];
-    if (p.indice + p.sentido < 0 || p.indice + p.sentido >= p.rota.length) p.sentido = -p.sentido;
-    p.indice += p.sentido;
-    p.pausa = 1.5 + (p.id.charCodeAt(1) % 3);
-  } else {
-    p.c += dc / distancia * passo;
-    p.r += dr / distancia * passo;
-  }
-}
-
-function desenharNpc(ctx, m) {
-  if (!m.pessoa) {
-    m.pessoa = { id: m.id, c: m.c + 0.5, r: m.r + 0.5,
-      sentado: false, quadro: 3, salto: 0, esquerda: !!m.virado, dancando: !!m.danca };
-  }
-  m.pessoa.salto = Math.abs(Math.sin(cena.tempo * 1.4 + m.c)) * 1.2;
-  m.pessoa.acao = m.quadros ? m.quadros[Math.floor(cena.tempo / 0.9 + m.c) % m.quadros.length] : null;
-  desenharAgente(ctx, m.pessoa);
 }
 
 function retanguloDoAgente(ag) {
@@ -2283,7 +2229,7 @@ function itensDaCena() {
   EXTERNOS.forEach(function(m) {
     itens.push({ tipo: 'externo', ref: m, c1: m.c, c2: m.c + m.l, r1: m.r, r2: m.r + m.p });
   });
-  AGENTES.concat(PASSANTES.filter(function(p) { return p.nivel === 'terraco'; }), sofa.deitado ? [] : [sofa]).forEach(function(ag) {
+  AGENTES.concat(sofa.deitado ? [] : [sofa]).forEach(function(ag) {
     itens.push({ tipo: 'agente', ref: ag, c1: ag.c - 0.3, c2: ag.c + 0.3, r1: ag.r - 0.3, r2: ag.r + 0.3 });
   });
   return ordenarProfundidade(itens);
@@ -2572,7 +2518,6 @@ function lacoAnimacao(agora) {
   ultimoQuadro = agora;
   if (!movimentoReduzido) cena.tempo += segundos;
   AGENTES.forEach(function(ag) { atualizarAgente(ag, segundos); });
-  PASSANTES.forEach(function(p) { atualizarPassante(p, segundos); });
   atualizarGordao(segundos);
   if (!cena.sala) {
     requestAnimationFrame(lacoAnimacao);
@@ -2592,7 +2537,6 @@ function lacoAnimacao(agora) {
   desenharCamada(ctx, cena.letreiros, AREA_LETREIROS);
   ctx.globalAlpha = 1;
   desenharPainelDeVideo(ctx);
-  PASSANTES.forEach(function(p) { if (p.nivel === 'mezanino') desenharAgente(ctx, p); });
   desenharGradeDoMezanino(ctx);
   desenharPiscinaViva(ctx);
   desenharPistaViva(ctx);
@@ -2608,7 +2552,7 @@ function lacoAnimacao(agora) {
 }
 
 function carregarImagens() {
-  var elenco = AGENTES.concat(PASSANTES, MOVEIS.filter(function(m) { return m.tipo === 'npc'; }), [sofa]);
+  var elenco = AGENTES.concat([sofa]);
   function carregar(id, nome, arquivo) {
     var img = new Image();
     img.src = '/sprites/personagens/' + id + '_' + arquivo + '.png?v=' + VERSAO_ARTE;
@@ -2639,7 +2583,6 @@ function iniciarEscritorio() {
   movimentoReduzido = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   carregarImagens();
   AGENTES.forEach(prepararAgente);
-  PASSANTES.forEach(prepararPassante);
   prepararGordao();
   ajustarEscala();
   window.addEventListener('resize', ajustarEscala);
@@ -2676,5 +2619,5 @@ if (typeof module !== 'undefined') {
     calcularRota: calcularRota, celulaLivre: celulaLivre, dentroDoPiso: dentroDoPiso, acessoDoAssento: acessoDoAssento, bloqueadas: bloqueadas,
     prepararAgente: prepararAgente, atualizarAgente: atualizarAgente, irPara: irPara, sentar: sentar, reservas: reservas, sofa: sofa,
     cena: cena, definirZoom: definirZoom, moverCamera: moverCamera, restaurarCamera: restaurarCamera, ZOOM_MINIMO: ZOOM_MINIMO, ZOOM_MAXIMO: ZOOM_MAXIMO,
-    FIXOS: FIXOS, EXTERNOS: EXTERNOS, ATIVIDADES_GORDAO: ATIVIDADES_GORDAO, prepararGordao: prepararGordao, atualizarGordao: atualizarGordao, PASSANTES: PASSANTES, prepararPassante: prepararPassante, atualizarPassante: atualizarPassante };
+    FIXOS: FIXOS, EXTERNOS: EXTERNOS, ATIVIDADES_GORDAO: ATIVIDADES_GORDAO, prepararGordao: prepararGordao, atualizarGordao: atualizarGordao, TAREFAS: TAREFAS, agenteDaEtapa: agenteDaEtapa, anunciarTarefa: anunciarTarefa, FALAS_REUNIAO: FALAS_REUNIAO };
 }

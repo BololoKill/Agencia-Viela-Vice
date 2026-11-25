@@ -2,14 +2,16 @@
 SPEC-003: contrato HTTP, segurança e idempotência das APIs do Escritório Virtual.
 """
 import json
+import os
 import socket
 import threading
+import time
 import unittest
 from unittest import mock
 
 import main as cli
 from apoio import AmbienteIsolado
-from src.pipeline import estado
+from src.pipeline import estado, roteiro
 import src.web.app as web
 
 
@@ -97,6 +99,127 @@ class TestAprovacaoIdempotente(BaseApi):
             resposta = self.client.post("/api/aprovar", json={"filename": self.video.name})
         self.assertEqual(resposta.status_code, 200)
         self.assertFalse(resposta.get_json()["enviado_youtube"])
+
+
+class TestEnvioEmAndamento(BaseApi):
+    """Enquanto um vídeo sobe para o YouTube, ele não volta para a Diretoria."""
+
+    def _durante_o_envio(self, acao):
+        liberar, iniciou = threading.Event(), threading.Event()
+
+        def enviar(video_path, **_):
+            iniciou.set()
+            liberar.wait(5)
+            return True, "ok", "yt123"
+
+        with mock.patch.object(web, "enviar_video_agendado", side_effect=enviar):
+            t = threading.Thread(target=lambda: web.app.test_client().post(
+                "/api/aprovar", json={"filename": self.video.name}))
+            t.start()
+            self.assertTrue(iniciou.wait(5))
+            try:
+                return acao()
+            finally:
+                liberar.set()
+                t.join()
+
+    def test_video_em_envio_sai_da_lista_da_diretoria(self):
+        dados = self._durante_o_envio(lambda: self.client.get("/api/data").get_json())
+        self.assertNotIn(self.video.name, [v["arquivo"] for v in dados["videos"]])
+        self.assertEqual(dados["enviando"], [self.video.name])
+
+    def test_segundo_clique_avisa_que_o_envio_ja_esta_em_andamento(self):
+        resposta = self._durante_o_envio(lambda: self.client.post("/api/aprovar", json={"filename": self.video.name}))
+        self.assertEqual(resposta.status_code, 409)
+        self.assertTrue(resposta.get_json()["em_andamento"])
+        self.assertIn("Diretoria", resposta.get_json()["error"])
+
+    def test_sem_envio_a_lista_fica_completa(self):
+        dados = self.client.get("/api/data").get_json()
+        self.assertIn(self.video.name, [v["arquivo"] for v in dados["videos"]])
+        self.assertEqual(dados["enviando"], [])
+
+
+class TestPainelDoCanalDark(BaseApi):
+    """O painel novo mostra os números do canal, a situação das IAs, a grade de cada tipo e os virais da vez."""
+
+    def test_painel_recebe_os_numeros_do_canal(self):
+        numeros = {"nome": "Viela Vice", "inscritos": 1200, "visualizacoes": 50000, "videos": 30, "atualizado_em": "17:00"}
+        with mock.patch.object(web, "estatisticas_do_canal", return_value=numeros):
+            self.assertEqual(self.client.get("/api/data").get_json()["canal"], numeros)
+
+    def test_painel_avisa_ate_que_horas_a_ia_de_roteiro_esta_em_pausa(self):
+        dados = self.client.get("/api/data").get_json()
+        self.assertEqual(set(dados["ia"]), {"roteiro", "visao"})
+        self.assertIsNone(dados["ia"]["roteiro"]["pausada_ate"])
+        with mock.patch.dict(roteiro._ia, {"pausada_ate": time.monotonic() + 600}):
+            pausa = self.client.get("/api/data").get_json()["ia"]["roteiro"]["pausada_ate"]
+        self.assertRegex(pausa, r"^\d\d:\d\d$")
+
+    def test_painel_recebe_a_grade_de_cada_tipo_e_nao_tem_mais_financeiro(self):
+        dados = self.client.get("/api/data").get_json()
+        self.assertEqual(dados["horarios_por_tipo"], {"short": ["12:00", "19:00"], "longo": ["17:00"]})
+        self.assertNotIn("financeiro", dados)
+
+    def test_painel_recebe_os_virais_da_vez(self):
+        self.assertEqual(self.client.get("/api/status").get_json()["virais"], [])
+        virais = [{"streamer": "alanzoka", "titulo": "BEM VINDO A LEONIDA!", "visualizacoes": 5826421}]
+        estado.publicar_status(virais=virais)
+        self.assertEqual(self.client.get("/api/status").get_json()["virais"], virais)
+
+    def test_rotas_do_escritorio_antigo_sairam(self):
+        for rota in ("/tema_agencia.css", "/escritorio_img"):
+            with self.subTest(rota=rota):
+                self.assertEqual(self.client.get(rota).status_code, 404)
+
+
+class TestArquivoPresoPeloPlayer(BaseApi):
+    """No Windows o player do painel segura o arquivo por alguns segundos depois de pausado."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(web, "INTERVALO_EXCLUSAO_S", 0.05)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _na_diretoria(self):
+        return [v["arquivo"] for v in self.client.get("/api/data").get_json()["videos"]]
+
+    def _esperar_sumir(self):
+        for _ in range(100):
+            if not self.video.exists():
+                return True
+            time.sleep(0.05)
+        return False
+
+    def _arquivo_em_uso(self):
+        """Simula o player: no Windows um arquivo aberto não pode ser apagado."""
+        self.liberado = threading.Event()
+        return mock.patch.object(web.Path, "unlink", autospec=True, side_effect=self._unlink_bloqueado)
+
+    def _unlink_bloqueado(self, caminho, missing_ok=False):
+        if not self.liberado.is_set():
+            raise PermissionError(32, "O arquivo já está sendo usado por outro processo")
+        if caminho.exists():
+            os.remove(caminho)
+
+    def test_rejeitar_video_em_uso_tira_da_diretoria_na_hora(self):
+        with self._arquivo_em_uso():
+            resposta = self.client.post("/api/negar", json={"filename": self.video.name})
+            self.assertEqual(resposta.status_code, 200)
+            self.assertNotIn(self.video.name, self._na_diretoria())
+            self.liberado.set()
+            self.assertTrue(self._esperar_sumir())
+        self.assertIn(self.video.name, json.loads((self.raiz / "descartados.json").read_text(encoding="utf-8")))
+
+    def test_video_enviado_ao_youtube_nao_volta_para_a_diretoria(self):
+        with self._arquivo_em_uso(), \
+                mock.patch.object(web, "enviar_video_agendado", return_value=(True, "ok", "yt123")):
+            resposta = self.client.post("/api/aprovar", json={"filename": self.video.name})
+            self.assertTrue(resposta.get_json()["enviado_youtube"])
+            self.assertNotIn(self.video.name, self._na_diretoria())
+            self.liberado.set()
+            self.assertTrue(self._esperar_sumir())
 
 
 class TestRejeicaoNaFila(BaseApi):
@@ -266,3 +389,47 @@ class TestInstanciaUnica(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPrioridadeDaProducao(unittest.TestCase):
+    """A produção cede o processador aos programas do usuário, sem mudar nada nos vídeos."""
+
+    def test_producao_roda_abaixo_do_normal(self):
+        processo = mock.Mock()
+        with mock.patch.object(cli.psutil, "Process", return_value=processo):
+            cli.reduzir_prioridade()
+        processo.nice.assert_called_once_with(cli.PRIORIDADE_PRODUCAO)
+
+    def test_falha_ao_mudar_prioridade_nao_impede_a_producao(self):
+        with mock.patch.object(cli.psutil, "Process", side_effect=OSError("acesso negado")):
+            cli.reduzir_prioridade()
+
+    def test_servidor_e_robo_reduzem_a_prioridade_ao_iniciar(self):
+        for comando in ("run", "worker"):
+            with self.subTest(comando=comando), \
+                    mock.patch.object(cli.sys, "argv", ["main.py", comando]), \
+                    mock.patch.object(cli, "porta_em_uso", return_value=False), \
+                    mock.patch.object(cli, "reduzir_prioridade") as reduzir, \
+                    mock.patch.object(cli, "loop_vigia_continuo"), mock.patch.object(cli, "iniciar_monitor_cotas"), \
+                    mock.patch.object(cli, "iniciar_servidor"), mock.patch.object(cli.threading, "Thread"):
+                cli.main()
+                reduzir.assert_called_once()
+
+
+class TestEnviosInterrompidos(BaseApi):
+    """Um envio cortado por desligamento não pode ficar para sempre como 'Enviando'."""
+
+    def test_painel_ao_iniciar_devolve_envios_interrompidos_para_a_fila(self):
+        self.agendados_file.write_text(json.dumps([
+            {"filename": "a.mp4", "status": "Enviando ao YouTube...", "youtube_id": None},
+            {"filename": "b.mp4", "status": "Agendado no canal com sucesso", "youtube_id": "yt1"},
+        ]), encoding="utf-8")
+        web.limpar_envios_interrompidos()
+        fila = json.loads(self.agendados_file.read_text(encoding="utf-8"))
+        self.assertTrue(fila[0]["status"].startswith("Fila Local"))
+        self.assertEqual(fila[1]["status"], "Agendado no canal com sucesso")
+
+    def test_servidor_limpa_ao_iniciar(self):
+        with mock.patch.object(web, "limpar_envios_interrompidos") as limpar, mock.patch.object(web.app, "run"):
+            web.iniciar_servidor()
+        limpar.assert_called_once()

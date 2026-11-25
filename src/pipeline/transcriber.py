@@ -21,12 +21,12 @@ CONTEXTO_WHISPER = (
 )
 
 
-def calcular_janela_transcricao(duracao_total: float) -> tuple:
+def calcular_janela_transcricao(duracao_total: float, janela: float = None) -> tuple:
     """
-    Define o trecho da live enviado ao Whisper: (início em segundos, duração ou None para tudo).
-    Pula a abertura da transmissão e evita transcrever horas para aproveitar poucos cortes.
+    Define o trecho do vídeo enviado ao Whisper: (início em segundos, duração ou None para tudo).
+    Pula a abertura e evita transcrever horas para aproveitar poucos cortes.
     """
-    janela = float(VIDEO_SPECS["janela_transcricao_s"])
+    janela = float(janela or VIDEO_SPECS["janela_transcricao_s"])
     if not duracao_total or duracao_total <= 0:
         return 0.0, janela
     if duracao_total <= janela:

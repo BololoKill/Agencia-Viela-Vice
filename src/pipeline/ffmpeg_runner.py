@@ -12,6 +12,10 @@ TIMEOUT_PADRAO_S = 1800
 AMOSTRAS_POR_PACOTE_AAC = 1024
 MAX_PACOTES_AMONTOADOS = 1
 MAX_DIFERENCA_AUDIO_VIDEO_S = 0.1
+MARGEM_COMERCIAL_S = 0.5
+DURACAO_MAXIMA_COMERCIAL_S = 360.0
+FOLGA_FIM_GRAVACAO_S = 4.0
+TIMEOUT_QUADROS_CHAVE_S = 300
 FONTE_WINDOWS = Path(r"C:\Windows\Fonts\arial.ttf")
 FONTE_TITULO = Path(r"C:\Windows\Fonts\ariblk.ttf")
 PASTA_FONTES = Path(r"C:\Windows\Fonts")
@@ -142,6 +146,52 @@ def garantir_sincronia(video) -> None:
             f"áudio com {medida['audio_s']:.2f}s, imagem com {medida['video_s']:.2f}s e "
             f"{medida['pacotes_amontoados']} pacotes de som amontoados.",
         )
+
+
+def _quadros_chave(video) -> list:
+    """Lista (instante, resolução) dos quadros-chave, sem precisar decodificar a gravação inteira."""
+    saida = subprocess.check_output(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-skip_frame", "nokey",
+         "-show_entries", "frame=pts_time,width,height", "-of", "csv=p=0", str(video)],
+        text=True, stderr=subprocess.DEVNULL, env=ambiente_ffmpeg(), timeout=TIMEOUT_QUADROS_CHAVE_S,
+    )
+    chaves = []
+    for linha in saida.splitlines():
+        campos = linha.strip().strip(",").split(",")
+        if len(campos) >= 3 and campos[0] not in ("", "N/A"):
+            chaves.append((float(campos[0]), (campos[1], campos[2])))
+    return chaves
+
+
+def detectar_intervalos_comerciais(video) -> list:
+    """
+    A Twitch exibe os comerciais em resolução diferente da live: trechos curtos fora da resolução
+    predominante não podem virar vídeo. Uma falha aqui não impede a edição.
+    """
+    try:
+        chaves = _quadros_chave(video)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return []
+    blocos = []
+    origem = chaves[0][0] if chaves else 0.0  # A edição conta o tempo a partir do início do arquivo
+    for instante, resolucao in ((tempo - origem, tamanho) for tempo, tamanho in chaves):
+        if blocos:
+            blocos[-1][2] = instante
+        if not blocos or blocos[-1][0] != resolucao:
+            blocos.append([resolucao, instante, instante])
+    if not blocos:
+        return []
+    blocos[-1][2] += FOLGA_FIM_GRAVACAO_S
+
+    tempo_por_resolucao = {}
+    for resolucao, inicio, fim in blocos:
+        tempo_por_resolucao[resolucao] = tempo_por_resolucao.get(resolucao, 0.0) + fim - inicio
+    predominante = max(tempo_por_resolucao, key=tempo_por_resolucao.get)
+    return [
+        (max(0.0, inicio - MARGEM_COMERCIAL_S), fim + MARGEM_COMERCIAL_S)
+        for resolucao, inicio, fim in blocos
+        if resolucao != predominante and fim - inicio <= DURACAO_MAXIMA_COMERCIAL_S
+    ]
 
 
 def detectar_telas_pretas(video, inicio: float = 0.0, duracao: float = None) -> list:

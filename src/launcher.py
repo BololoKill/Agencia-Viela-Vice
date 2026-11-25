@@ -29,8 +29,9 @@ def formatar_cabecalho_branding() -> str:
    ╚██╗ ██╔╝██║██╔══╝  ██║     ██╔══██║    ╚██╗ ██╔╝██║██║     ██╔══╝  
     ╚████╔╝ ██║███████╗███████╗██║  ██║     ╚████╔╝ ██║╚██████╗███████╗
      ╚═══╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝      ╚═══╝  ╚═╝ ╚═════╝╚══════╝{RESET}
-{MAGENTA}{NEGRITO}                 ★ AGENCIA VIELA VICE — SISTEMA 6 ESTRELAS ★{RESET}
-{AMARELO}    Diretor: Dr. Ricardo | Curadoria: Camila | Olheiro GTA 6: Bruno{RESET}
+{MAGENTA}{NEGRITO}            ★ AGENCIA VIELA VICE — CANAL DARK DE GTA 6 ★{RESET}
+{AMARELO}  Bruno (virais) · Caio (downloads) · Thiago (roteiro) · Lucas e Mariana (edição)
+  Camila (auditoria) · Beatriz (publicação) · Dr. Ricardo (Diretoria: a sua aprovação){RESET}
 {MAGENTA}========================================================================{RESET}
 """
     return arte
@@ -38,12 +39,11 @@ def formatar_cabecalho_branding() -> str:
 def obter_menu_opcoes() -> dict:
     """Retorna as opções disponíveis no menu do launcher."""
     return {
-        "1": {"titulo": "🚀 Iniciar Sistema Completo (Escritório + Robô Vigia) [RECOMENDADO]", "cmd": "run"},
-        "2": {"titulo": "🏢 Iniciar Apenas Escritório Virtual (Dashboard Web)", "cmd": "server"},
-        "3": {"titulo": "🤖 Iniciar Apenas Robô Vigia (Cortes e Produção)", "cmd": "worker"},
-        "4": {"titulo": "🛡️ Executar Curadoria Técnica da Fila (Top 6)", "cmd": "curadoria"},
-        "5": {"titulo": "🧹 Suporte T.I.: Limpeza de Temporários e Purga", "cmd": "purge"},
-        "6": {"titulo": "🤝 Realizar Reunião Executiva de Governança", "cmd": "reuniao"},
+        "1": {"titulo": "🚀 Iniciar Sistema Completo (Escritório + Robô de produção) [RECOMENDADO]", "cmd": "run"},
+        "2": {"titulo": "🏢 Iniciar Apenas o Escritório (painel no navegador)", "cmd": "server"},
+        "3": {"titulo": "🤖 Iniciar Apenas o Robô (vídeos virais, Shorts e Top 5)", "cmd": "worker"},
+        "4": {"titulo": "🛡️ Auditoria técnica dos vídeos prontos", "cmd": "curadoria"},
+        "5": {"titulo": "🧹 Suporte T.I.: Limpeza de Temporários", "cmd": "purge"},
         "0": {"titulo": "❌ Encerrar e Sair", "cmd": "exit"}
     }
 
@@ -97,11 +97,11 @@ def exibir_menu_interativo():
             print(f"  {cor}[{k}]{RESET} {v['titulo']}")
 
         print(f"\n{MAGENTA}------------------------------------------------------------------------{RESET}")
-        escolha = input(f"{AMARELO}Digite o número da opção (0-6): {RESET}").strip()
+        escolha = input(f"{AMARELO}Digite o número da opção (0-5): {RESET}").strip()
 
         cmd = mapear_comando_opcao(escolha)
         if not cmd:
-            print(f"\n{VERMELHO}Opção inválida! Escolha um número de 0 a 6.{RESET}")
+            print(f"\n{VERMELHO}Opção inválida! Escolha um número de 0 a 5.{RESET}")
             time.sleep(1.5)
             continue
 
@@ -130,7 +130,7 @@ def exibir_menu_interativo():
             subprocess.run([sys.executable, str(base_dir / "main.py"), cmd])
             break
 
-        elif cmd in ("worker", "curadoria", "reuniao"):
+        elif cmd in ("worker", "curadoria"):
             print(f"\n{VERDE}Executando comando '{cmd}'...{RESET}\n")
             subprocess.run([sys.executable, str(base_dir / "main.py"), cmd])
             print(f"\n{CIANO}Pressione ENTER para voltar ao menu principal...{RESET}")

@@ -63,24 +63,13 @@ e.MOVEIS.forEach(m => {
   }
 });
 const externosNoPiso = e.EXTERNOS.filter(m => e.dentroDoPiso(Math.floor(m.c), Math.floor(m.r))).map(m => m.tipo);
-const terraco = e.PASSANTES.filter(p => p.nivel === 'terraco');
-const passantesNoPiso = terraco.filter(p => p.rota.some(([c, r]) => e.dentroDoPiso(Math.floor(c), Math.floor(r)))).map(p => p.id);
-const percursos = e.PASSANTES.filter(p => p.rota.length > 1).map(p => {
-  e.prepararPassante(p);
-  const visitados = new Set();
-  for (let i = 0; i < 60 * 240; i++) {
-    e.atualizarPassante(p, 1 / 60);
-    p.rota.forEach((alvo, n) => { if (Math.hypot(alvo[0] - p.c, alvo[1] - p.r) < 0.02) visitados.add(n); });
-  }
-  return visitados.size === p.rota.length;
-});
 const sofa = e.MOVEIS.find(m => m.tipo === 'sofa');
 console.log(JSON.stringify({ erros, agentes: e.AGENTES.length,
   assentos: new Set(e.AGENTES.map(a => a.assento.join(','))).size,
   gordaoNoSofa: !!e.bloqueadas[Math.floor(e.sofa.c) + ',' + Math.floor(e.sofa.r)]
     && e.sofa.c > sofa.c && e.sofa.c < sofa.c + sofa.l,
   areaLivre: livres.length, alcancaveis: vistos.size, sobrepostos, foraDoPiso, semDesenho,
-  externosNoPiso, passantesNoPiso, percursos, npcs: e.MOVEIS.filter(m => m.tipo === 'npc').length + e.PASSANTES.length,
+  externosNoPiso, figurantes: e.MOVEIS.filter(m => m.tipo === 'npc').length + (e.PASSANTES || []).length,
   externosSemDesenho: e.EXTERNOS.filter(m => !e.FIXOS[m.tipo]).map(m => m.tipo) }));
 """
 
@@ -214,11 +203,10 @@ class TestPlantaDoEscritorio(unittest.TestCase):
 
     def test_terraco_fica_fora_do_piso_do_escritorio(self):
         self.assertEqual(self.resultado["externosNoPiso"], [])
-        self.assertEqual(self.resultado["passantesNoPiso"], [])
 
-    def test_figurantes_completam_seus_percursos(self):
-        self.assertGreaterEqual(self.resultado["npcs"], 10)
-        self.assertTrue(all(self.resultado["percursos"]))
+    def test_escritorio_nao_tem_mais_figurantes(self):
+        """Pedido de 24/11: ficam só as pessoas que cobrem uma função; os figurantes de volume saíram."""
+        self.assertEqual(self.resultado["figurantes"], 0)
 
 
 @unittest.skipUnless(shutil.which("node"), "Node.js não está disponível")
@@ -229,8 +217,7 @@ class TestElencoSemRepeticao(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        codigo = ("const e=require(process.argv[1]);console.log(JSON.stringify(e.AGENTES.concat(e.PASSANTES,"
-                  "e.MOVEIS.filter(m=>m.tipo==='npc')).map(p=>p.id)))")
+        codigo = "const e=require(process.argv[1]);console.log(JSON.stringify(e.AGENTES.map(p=>p.id)))"
         cls.ids = json.loads(subprocess.check_output(["node", "-e", codigo, str(ESCRITORIO)], text=True, encoding="utf-8"))
 
     def test_todos_tem_as_quatro_poses(self):
@@ -249,6 +236,56 @@ class TestElencoSemRepeticao(unittest.TestCase):
             silhuetas.setdefault(alfa.tobytes(), []).append(pessoa)
         repetidos = [nomes for nomes in silhuetas.values() if len(nomes) > 1]
         self.assertEqual(repetidos, [])
+
+
+TAREFAS = r"""
+const e = require(process.argv[1]);
+const etapas = {
+  busca: 'Buscando os vídeos de GTA 6 mais virais da semana...',
+  download: 'Baixando o trecho do vídeo viral 2/5 (alanzoka)...',
+  jogo: 'Conferindo o jogo no vídeo viral 2/5 (alanzoka)...',
+  fala: 'Transcrevendo o vídeo viral 2/5 (alanzoka)...',
+  ia: 'Esperando a IA de roteiro voltar para narrar o Short 1 (até 5 min)...',
+  short: 'Renderizando Short 1/4 (alanzoka)...',
+  top: 'Montando o Top 5 da semana...',
+  fim: 'Ciclo concluído: 4 Short(s) e 1 vídeo(s) longo(s) pronto(s)!',
+  estoque: 'Estoque completo (9/9). Em pausa.',
+  outra: 'Robô Vigia iniciado.'
+};
+const quem = {};
+Object.keys(etapas).forEach(k => { quem[k] = e.agenteDaEtapa(etapas[k]); });
+const falas = [];
+e.AGENTES.forEach(a => { a.balao = null; });
+global.falar = (ag, texto) => falas.push(ag.id + ':' + texto);
+e.anunciarTarefa(etapas.download);
+e.anunciarTarefa(etapas.download);
+console.log(JSON.stringify({ quem, cargos: e.AGENTES.map(a => a.cargo), reuniao: Object.keys(e.FALAS_REUNIAO).sort(),
+  ids: e.AGENTES.map(a => a.id).sort() }));
+"""
+
+
+@unittest.skipUnless(shutil.which("node"), "Node.js não está disponível")
+class TestCadaEtapaTemQuemCuide(unittest.TestCase):
+    """Cada pessoa da equipe é uma etapa real da produção; o painel mostra quem está trabalhando agora."""
+
+    @classmethod
+    def setUpClass(cls):
+        saida = subprocess.check_output(["node", "-e", TAREFAS, str(ESCRITORIO)], text=True, encoding="utf-8")
+        cls.r = json.loads(saida.strip().splitlines()[-1])
+
+    def test_cada_etapa_aponta_quem_cuida_dela(self):
+        self.assertEqual(self.r["quem"], {
+            "busca": "bruno", "download": "caio", "jogo": "camila", "fala": "thiago", "ia": "thiago",
+            "short": "lucas", "top": "mariana", "fim": "camila", "estoque": "dr_ricardo", "outra": None})
+
+    def test_cargos_falam_do_modelo_novo(self):
+        cargos = " ".join(self.r["cargos"])
+        for funcao in ("Olheiro de Virais", "Downloads", "Roteirista", "Shorts", "Top 5", "Publicação", "Diretoria"):
+            self.assertIn(funcao, cargos)
+        self.assertNotIn("CTR", cargos)
+
+    def test_todos_explicam_a_funcao_na_reuniao(self):
+        self.assertEqual(self.r["reuniao"], self.r["ids"])
 
 
 SIMULACAO_GORDAO = r"""

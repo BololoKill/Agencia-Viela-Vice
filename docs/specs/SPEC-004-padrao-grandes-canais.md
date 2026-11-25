@@ -37,40 +37,59 @@ Os Shorts saíam sem marca visível e sem a narração final, a edição estava 
 
 ### Busca
 
-1. Ordem de prioridade: lives de GTA 6 no ar, vídeos de GTA 6 dos últimos 7 dias, GTA RP como reserva.
+1. Matéria-prima: os vídeos de GTA 6 em português mais vistos da semana; com a semana aproveitada, os do mês. Lives não são mais gravadas.
 2. Títulos fora do tema são ignorados: contagem regressiva, GTA 5 e transmissões em outro idioma.
-3. Live no ar é gravada por 21 minutos, sem esperar o fim da transmissão.
+3. De cada vídeo viral são baixados só 6 minutos; um criador entra no máximo uma vez por ciclo.
+   A imagem e o som descem separados. Se o YouTube derruba a conexão, o download continua de onde parou,
+   e a parte que chega cortada é baixada de novo sozinha.
 4. Áudio que não esteja em português é descartado antes do render.
+5. Um trecho conferido sem fala do criador em português fica guardado por 30 dias (`trechos_sem_fala.json`) e não é
+   baixado de novo: o próximo ciclo vai direto para o outro trecho do vídeo.
+6. Os downloads e os arquivos temporários ficam no SSD (`D:/VielaVice/video-bruto`), que é mais rápido e poupa o HD do
+   Windows; sem o SSD, ficam na pasta do projeto. Os vídeos prontos continuam em `exportacao`.
 
 ### Produção e estoque
 
-1. Cada ciclo produz até 4 Shorts e 2 vídeos longos.
-2. A fila guarda no máximo 60 vídeos: 40 Shorts e 20 longos.
-3. Vídeos longos são horizontais, em 1280x720, com cerca de 10 minutos, abertura narrada e chamada final.
-4. Lives de GTA 6 dos canais cadastrados na Twitch têm prioridade sobre a busca no YouTube.
+1. Cada ciclo produz até 4 Shorts (um por vídeo viral) e 1 vídeo longo Top 5 da semana, com um trecho de cada vídeo.
+   Só entra no ciclo o vídeo com um momento seguido de fala para Short ou para o Top; fala espalhada em pedaços
+   curtos não conta. O vídeo que não rende Short passa a vaga para o próximo.
+2. A fila guarda no máximo 9 vídeos, 3 dias de publicação do canal: 6 Shorts e 3 longos.
+3. Vídeos longos são horizontais, em 1280x720, com 8min30, abertura narrada e chamada final.
+4. Toda descrição traz o crédito e o link do vídeo original, e o longo mostra o nome de cada criador na tela.
 5. Falas fora do português não entram em legendas, títulos nem cortes.
 
 ### Estrelas
 
-1. Cada canal mostra de 0 a 6 estrelas conforme os envios do ciclo atual.
+1. Padrão dark num canal só: ele recebe 1 vídeo longo e 2 Shorts por ciclo e mostra de 0 a 3 estrelas conforme os envios.
+   O longo é publicado às 17:00 e os Shorts às 12:00 e às 19:00; o 2º longo ou o 3º Short do dia no mesmo canal é recusado.
 2. O ciclo da cota reinicia às 05:00.
 3. Só contam os vídeos realmente enviados ao YouTube.
-4. O painel do gerente mostra as estrelas do canal escolhido e bloqueia o envio em 6/6.
+4. O painel do gerente mostra as estrelas do canal escolhido e bloqueia o envio quando o tipo do vídeo já completou o dia.
 5. O servidor também recusa envios acima da cota.
 6. O botão de estrelas e o contador "Envios de Hoje" refletem os números reais.
 7. A estrela é gasta no momento do envio, mesmo que a publicação esteja agendada para outro dia.
 8. Um vídeo agendado não volta a contar quando é publicado em um ciclo posterior.
 9. Sem confirmação da cota no YouTube, o envio é cancelado.
-10. Cada canal tem a própria grade de horários, sempre com horários futuros.
+10. Cada canal tem a própria grade de horários por tipo de vídeo, sempre com horários futuros.
+11. Vídeo sem narração própria (formato antigo) não é produzido nem aprovado.
 
 ### Escritório virtual
 
 1. O cenário é desenhado em código (`escritorio.js`), com tema neon de pôr do sol, e cada móvel ocupa espaço real no piso.
-2. Os personagens desviam dos móveis e uns dos outros, tomam café, usam o celular, conversam e dançam.
-3. O Gordão, de terno VIP verde, vive na Green Room: descansa no sofá, joga sinuca, pega bebida no freezer, vai ao bar, toca nas pickups, joga arcade e pebolim e dança.
-4. A Green Room tem barman, bar, freezer de bebidas, mesa de sinuca, pickups, arcades e pebolim.
-5. Cada personagem tem aparência própria, com proporção humana e iluminação realista.
-6. O botão de varredura funciona como play/pause e mostra a bolinha verde quando a produção está ao vivo.
+2. No escritório só ficam as 8 pessoas da equipe, e cada uma cobre uma etapa real da produção: Bruno (busca dos virais),
+   Caio (download e computador), Camila (curadoria e auditoria), Thiago (roteiro e narração), Lucas (Shorts),
+   Mariana (Top 5 da semana), Dr. Ricardo (Diretoria, a aprovação do dono) e Beatriz (publicação e horários).
+   Os figurantes de volume saíram.
+3. Quando uma etapa começa, quem cuida dela fala no escritório e aparece em "Produção agora". Clicar numa pessoa mostra
+   a função dela; o botão "Equipe e funções" explica como um vídeo nasce e o que faz cada botão do painel.
+4. Os personagens desviam dos móveis e uns dos outros, tomam café, usam o celular e conversam.
+5. O Gordão, de terno VIP verde, é o mascote da Green Room e não tem etapa na produção: descansa no sofá, joga sinuca,
+   pega bebida no freezer, vai ao bar, toca nas pickups, joga arcade e pebolim e dança.
+6. A Green Room tem bar, freezer de bebidas, mesa de sinuca, pickups, arcades e pebolim.
+7. Cada personagem tem aparência própria, com proporção humana e iluminação realista.
+8. O botão de produção funciona como play/pause e mostra a bolinha verde com "PRODUZINDO" quando a produção está ligada.
+9. O topo do painel mostra os vídeos na Diretoria, a publicação de hoje e os números reais do canal no YouTube,
+   consultados em segundo plano no máximo uma vez por hora.
 
 ## Como testar
 

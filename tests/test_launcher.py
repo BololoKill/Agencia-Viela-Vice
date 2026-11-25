@@ -41,7 +41,7 @@ class TestLauncher(unittest.TestCase):
         self.assertIn("3", opcoes)
         self.assertIn("4", opcoes)
         self.assertIn("5", opcoes)
-        self.assertIn("6", opcoes)
+        self.assertNotIn("6", opcoes, "a reunião fictícia de governança saiu do menu")
         self.assertIn("0", opcoes)
         self.assertIn("Completo", opcoes["1"]["titulo"])
         self.assertIn("Escritório", opcoes["2"]["titulo"])
@@ -54,6 +54,7 @@ class TestLauncher(unittest.TestCase):
         cabecalho = formatar_cabecalho_branding()
         self.assertTrue("AGENCIA VIELA VICE" in cabecalho or "VIELA VICE" in cabecalho)
         self.assertIn("Dr. Ricardo", cabecalho)
+        self.assertIn("CANAL DARK DE GTA 6", cabecalho)
 
     def test_verificar_porta_ocupada(self):
         """Valida detecção correta de portas abertas/fechadas."""
@@ -73,7 +74,7 @@ class TestLauncher(unittest.TestCase):
         self.assertEqual(mapear_comando_opcao("3"), "worker")
         self.assertEqual(mapear_comando_opcao("4"), "curadoria")
         self.assertEqual(mapear_comando_opcao("5"), "purge")
-        self.assertEqual(mapear_comando_opcao("6"), "reuniao")
+        self.assertIsNone(mapear_comando_opcao("6"))
         self.assertEqual(mapear_comando_opcao("0"), "exit")
         self.assertIsNone(mapear_comando_opcao("99"))
         self.assertIsNone(mapear_comando_opcao("xyz"))

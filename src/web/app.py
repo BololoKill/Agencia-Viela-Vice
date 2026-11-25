@@ -5,19 +5,22 @@ Expõe o Escritório Virtual e a suíte completa de APIs REST para a Diretoria, 
 import re
 import socket
 import threading
+import time
 import psutil
 from datetime import datetime, timedelta
-from flask import Flask, jsonify, request, send_file, send_from_directory
+from pathlib import Path
+from flask import Flask, jsonify, request, send_from_directory
 from src.config import (
-    BASE_DIR, EXPORT_DIR, VIDEO_BRUTO_DIR, SPRITES_DIR, IMAGE_PATH,
+    BASE_DIR, EXPORT_DIR, VIDEO_BRUTO_DIR, SPRITES_DIR,
     AFILIADOS_FILE, AGENDADOS_FILE, DESCARTADOS_FILE,
-    FINANCEIRO_FILE, HISTORICO_FILE, METADADOS_FILE,
-    DEFAULT_HORARIOS, CANAIS_VIELA_VICE, COTA_DIARIA_CANAL
+    HISTORICO_FILE, METADADOS_FILE,
+    DEFAULT_HORARIOS, CANAIS_VIELA_VICE, COTA_DIARIA_CANAL, COTA_POR_TIPO, HORARIOS_POR_TIPO, VIDEO_SPECS
 )
 from src.utils import load_json_safe, save_json_safe, log_terminal, ler_ultimas_linhas
 from src.youtube import cota
 from src.youtube.uploader import enviar_video_agendado
-from src.pipeline import estado
+from src.pipeline import estado, roteiro, verificador
+from src.youtube.canal import estatisticas_do_canal
 from src.pipeline.worker import executar_ciclo_producao
 
 # static_folder=None impede que a raiz do projeto (com .env e tokens) seja publicada.
@@ -28,6 +31,34 @@ _SEM_CACHE = {"Cache-Control": "no-store"}
 MARGEM_AGENDAMENTO_MIN = 30
 _aprovacoes_em_andamento = set()
 _trava_aprovacoes = threading.Lock()
+# Um envio por vez: vários vídeos subindo juntos congestionam a internet e estouram o tempo de cada parte
+_fila_de_envio = threading.Semaphore(1)
+INTERVALO_EXCLUSAO_S = 2.0
+TENTATIVAS_EXCLUSAO = 60
+
+
+def _insistir_na_exclusao(caminho: Path):
+    for _ in range(TENTATIVAS_EXCLUSAO):
+        time.sleep(INTERVALO_EXCLUSAO_S)
+        try:
+            caminho.unlink(missing_ok=True)
+            return
+        except OSError:
+            continue
+    log_terminal(f"[AVISO] {caminho.name} continua em uso. Ele será apagado no próximo ciclo de produção.")
+
+
+def _apagar_video(caminho: Path) -> bool:
+    """
+    No Windows o player do painel segura o arquivo por alguns segundos depois de pausado.
+    Nesse caso a exclusão continua em segundo plano. Devolve True se o arquivo já saiu do disco.
+    """
+    try:
+        caminho.unlink(missing_ok=True)
+        return True
+    except OSError:
+        threading.Thread(target=_insistir_na_exclusao, args=(caminho,), daemon=True).start()
+        return False
 
 
 def _versao_painel() -> str:
@@ -60,6 +91,21 @@ def calcular_proximo_horario(agendados, horarios_config, canal_id="1", agora: da
     return (agora + timedelta(days=30)).strftime("%Y-%m-%d"), horarios_config[0]
 
 
+def grade_do_tipo(tipo: str) -> list:
+    """Horários de publicação do tipo do vídeo. O arquivo de afiliados pode trocar a grade de cada tipo."""
+    afiliados = load_json_safe(AFILIADOS_FILE, {})
+    grades = afiliados.get("horarios_por_tipo") if isinstance(afiliados, dict) else None
+    grade = grades.get(tipo) if isinstance(grades, dict) else None
+    return grade if isinstance(grade, list) and grade else HORARIOS_POR_TIPO[tipo]
+
+
+def _no_padrao_dark(filename: str) -> bool:
+    """Vídeo marcado sem narração própria (o formato antigo) não vai para o canal."""
+    metadados = load_json_safe(METADADOS_FILE, {})
+    dados = metadados.get(filename) if isinstance(metadados, dict) else None
+    return not isinstance(dados, dict) or dados.get("formato") == "dark"
+
+
 @app.route('/')
 def index():
     """Entrega a interface do escritório virtual."""
@@ -87,25 +133,9 @@ def serve_escritorio_js():
     return "", 404
 
 
-@app.route('/tema_agencia.css')
-def serve_css():
-    """Entrega o tema escuro estilizado."""
-    css_path = BASE_DIR / "tema_agencia.css"
-    if css_path.exists():
-        return css_path.read_text(encoding="utf-8"), 200, {'Content-Type': 'text/css'}
-    return "", 404
-
-
 @app.route('/sprites/<path:filename>')
 def serve_sprite(filename):
     return send_from_directory(str(SPRITES_DIR), filename)
-
-
-@app.route('/escritorio_img')
-def serve_escritorio():
-    if IMAGE_PATH.exists():
-        return send_file(str(IMAGE_PATH))
-    return "Imagem de fundo não encontrada", 404
 
 
 @app.route('/exportacao/<path:filename>')
@@ -119,7 +149,12 @@ def api_data():
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     all_videos = [f.name for f in EXPORT_DIR.glob("*.mp4")]
     descartados = load_json_safe(DESCARTADOS_FILE, [])
-    novos_videos = [v for v in all_videos if v not in descartados]
+    agendados = load_json_safe(AGENDADOS_FILE, [])
+    enviados = {item.get("filename") for item in agendados if isinstance(item, dict) and item.get("youtube_id")}
+    with _trava_aprovacoes:
+        enviando = sorted(_aprovacoes_em_andamento)
+    # Quem já foi decidido (rejeitado, enviado ou subindo agora) não aguarda mais a Diretoria
+    novos_videos = [v for v in all_videos if v not in descartados and v not in enviando and v not in enviados]
     metadados = load_json_safe(METADADOS_FILE, {})
     metadados = metadados if isinstance(metadados, dict) else {}
 
@@ -130,29 +165,31 @@ def api_data():
         pendentes.append({
             "arquivo": v,
             "filename": v,
-            "titulo": dados_corte.get("titulo") or f"{nome_limpo} | GTA RP Brasil #Shorts",
-            "descricao": dados_corte.get("descricao") or "Inscreva-se no canal Viela Vice! Os melhores momentos do GTA RP brasileiro. #GTA6 #GTARP #Shorts"
+            "tipo": cota.tipo_do_video(v),
+            "titulo": dados_corte.get("titulo") or f"{nome_limpo} | GTA 6 #Shorts",
+            "descricao": dados_corte.get("descricao") or "Inscreva-se no canal Viela Vice! As histórias mais insanas de GTA 6, narradas. #GTA6 #GTAVI #Shorts",
+            "formato": dados_corte.get("formato") or "padrao",
+            "roteiro": dados_corte.get("roteiro"),
         })
 
-    agendados = load_json_safe(AGENDADOS_FILE, [])
-    financeiro = load_json_safe(FINANCEIRO_FILE, {
-        "adsense": 1420.50,
-        "afiliados": 680.00,
-        "videos_mes": 42,
-        "postados_mes": len(agendados)
-    })
     cotas = cota.resumo()
 
     return jsonify({
         "cotas": cotas,
         "envios_hoje": sum(c["usados"] for c in cotas.values()),
         "limite_envios": COTA_DIARIA_CANAL * len(CANAIS_VIELA_VICE),
+        "cota_por_tipo": COTA_POR_TIPO,
+        "limite_estoque": VIDEO_SPECS["limite_estoque_max"],
+        "canais": [{"id": canal_id, "nome": f"{canal_id}. {info['nome']}"} for canal_id, info in CANAIS_VIELA_VICE.items()],
         "videos": pendentes,
         "pendentes": pendentes,
+        "enviando": enviando,
         "agendados": agendados,
         "fila": agendados,
-        "financeiro": financeiro,
-        "total_estoque": len(novos_videos)
+        "total_estoque": len(novos_videos),
+        "horarios_por_tipo": {tipo: grade_do_tipo(tipo) for tipo in COTA_POR_TIPO},
+        "ia": {"roteiro": roteiro.estado_da_ia(), "visao": verificador.estado_da_ia()},
+        "canal": estatisticas_do_canal(),
     })
 
 
@@ -162,9 +199,9 @@ def _reservar_agendamento(filename, titulo, canal_id):
         agendados = load_json_safe(AGENDADOS_FILE, [])
         registro = next((item for item in agendados if item.get("filename") == filename), None)
         if registro is None:
-            afiliados = load_json_safe(AFILIADOS_FILE, {})
+            # Cada tipo tem o seu horário: o longo não toma a vaga dos Shorts e vice-versa
             data_agenda, hora_agenda = calcular_proximo_horario(
-                agendados, afiliados.get("horarios", DEFAULT_HORARIOS), canal_id)
+                agendados, grade_do_tipo(cota.tipo_do_video(filename)), canal_id)
             registro = {"id": len(agendados) + 1, "filename": filename, "data": data_agenda, "horario": hora_agenda}
             agendados.append(registro)
         registro.update({
@@ -197,9 +234,13 @@ def _processar_aprovacao(filename, video_path, titulo, descricao, canal_id):
         })
     if not video_path.exists():
         return jsonify({"success": False, "error": "Arquivo não encontrado"}), 404
+    if not _no_padrao_dark(filename):
+        return jsonify({"success": False, "fora_do_padrao": True,
+                        "error": "Vídeo fora do padrão dark, sem narração própria. Rejeite este vídeo."}), 409
 
+    tipo = cota.tipo_do_video(filename)
     try:
-        cota.reservar_envio(canal_id)
+        cota.reservar_envio(canal_id, tipo)
     except cota.CotaEsgotada as e:
         return jsonify({"success": False, "cota_esgotada": True, "error": str(e)}), 409
     except cota.CotaNaoVerificada as e:
@@ -209,21 +250,24 @@ def _processar_aprovacao(filename, video_path, titulo, descricao, canal_id):
     ok_yt, msg_yt, vid_id = False, "Envio não iniciado", None
     try:
         data_agenda, hora_agenda = _reservar_agendamento(filename, titulo, canal_id)
-        ok_yt, msg_yt, vid_id = enviar_video_agendado(
-            video_path=video_path,
-            titulo=titulo,
-            descricao=descricao,
-            data_agenda=data_agenda,
-            hora_agenda=hora_agenda,
-            canal_id=canal_id
-        )
+        with _fila_de_envio:
+            ok_yt, msg_yt, vid_id = enviar_video_agendado(
+                video_path=video_path,
+                titulo=titulo,
+                descricao=descricao,
+                data_agenda=data_agenda,
+                hora_agenda=hora_agenda,
+                canal_id=canal_id
+            )
     except Exception as e:
         ok_yt, msg_yt, vid_id = False, f"Erro inesperado no envio: {e}", None
     finally:
-        cota.concluir_envio(canal_id, vid_id if ok_yt else None)
+        cota.concluir_envio(canal_id, vid_id if ok_yt else None, tipo)
 
     if not ok_yt and "quotaexceeded" in str(msg_yt).lower():
         cota.marcar_api_esgotada()
+    elif not ok_yt and "uploadlimitexceeded" in str(msg_yt).lower():
+        cota.marcar_canal_no_limite(canal_id)
 
     _concluir_agendamento(filename, vid_id, msg_yt if ok_yt else f"Fila Local ({msg_yt})")
 
@@ -241,10 +285,7 @@ def _processar_aprovacao(filename, video_path, titulo, descricao, canal_id):
         })
 
     # Enviado ao YouTube: remove do disco para economizar espaço
-    try:
-        video_path.unlink()
-    except OSError:
-        pass
+    _apagar_video(video_path)
     log_terminal(f"[SUCESSO] {filename} agendado para {data_agenda} às {hora_agenda}.")
     return jsonify({
         "success": True, "enviado_youtube": True,
@@ -266,13 +307,16 @@ def api_aprovar():
 
     with _trava_aprovacoes:
         if filename in _aprovacoes_em_andamento:
-            return jsonify({"success": False, "error": "Este vídeo já está sendo enviado."}), 409
+            return jsonify({
+                "success": False, "em_andamento": True,
+                "error": "Este vídeo já está sendo enviado ao YouTube. Ele sai da Diretoria assim que o envio terminar."
+            }), 409
         _aprovacoes_em_andamento.add(filename)
 
     try:
         return _processar_aprovacao(
             filename, video_path,
-            data.get("titulo") or "Momento Épico GTA RP #Shorts",
+            data.get("titulo") or "Momento Épico no GTA 6 #Shorts",
             data.get("descricao") or "",
             str(data.get("canal")) if str(data.get("canal")) in CANAIS_VIELA_VICE else "1",
         )
@@ -306,18 +350,16 @@ def api_negar():
         if filename in _aprovacoes_em_andamento:
             return jsonify({"success": False, "error": "Este vídeo está sendo enviado ao YouTube."}), 409
 
-    try:
-        video_path.unlink(missing_ok=True)
-    except OSError as e:
-        return jsonify({"success": False, "error": f"Não foi possível excluir o vídeo: {e}"}), 500
-
+    # A decisão vale na hora, mesmo que o player ainda segure o arquivo por alguns segundos
     descartados = load_json_safe(DESCARTADOS_FILE, [])
     if filename not in descartados:
         descartados.append(filename)
         save_json_safe(DESCARTADOS_FILE, descartados)
 
     _remover_da_fila_local(filename)
-    return jsonify({"success": True, "message": f"Vídeo {filename} rejeitado e excluído."})
+    if _apagar_video(video_path):
+        return jsonify({"success": True, "message": f"Vídeo {filename} rejeitado e excluído."})
+    return jsonify({"success": True, "message": f"Vídeo {filename} rejeitado. O arquivo será apagado assim que o player o liberar."})
 
 
 @app.route('/api/buscar_lives', methods=['POST'])
@@ -399,6 +441,21 @@ def porta_em_uso(port: int, host: str = "127.0.0.1") -> bool:
         return s.connect_ex((host, port)) == 0
 
 
+def limpar_envios_interrompidos():
+    """Ao iniciar não há envio em andamento: o que ficou como 'Enviando' foi cortado e volta para a fila."""
+    with _trava_aprovacoes:
+        agendados = load_json_safe(AGENDADOS_FILE, [])
+        alterados = 0
+        for item in agendados:
+            if isinstance(item, dict) and not item.get("youtube_id") and str(item.get("status", "")).startswith("Enviando"):
+                item["status"] = "Fila Local (envio interrompido; aprove de novo)"
+                alterados += 1
+        if alterados:
+            save_json_safe(AGENDADOS_FILE, agendados)
+            log_terminal(f"[AVISO] {alterados} envio(s) interrompido(s) voltaram para a fila local.")
+
+
 def iniciar_servidor(host: str = "127.0.0.1", port: int = 8501):
     """Executa o servidor Flask."""
+    limpar_envios_interrompidos()
     app.run(host=host, port=port, debug=False, threaded=True)

@@ -15,24 +15,22 @@ PALAVRAS_FORTES = {
 }
 HASHTAGS_ROTATIVAS = [
     "#GTA6 #GTAVI #Shorts #VielaVice",
-    "#GTA6 #GTARP #Shorts #GamerBrasil",
+    "#GTA6 #GTA6Brasil #Shorts #GamerBrasil",
     "#GTAVI #GTA6Brasil #Shorts #Gameplay",
-    "#GTA6 #LiveBrasil #Shorts #CortesDeLive",
+    "#GTA6 #ViralGTA6 #Shorts #Narrado",
 ]
+TITULO_COMPILACAO = "TOP {quantidade} momentos mais virais de GTA 6 da semana"
+FALA_MINIMA_DO_TRECHO = 0.4  # Trecho da compilação com menos de 40% de fala vira silêncio na tela
+FOLGA_FIM_DA_FRASE = 1.12  # O trecho pode crescer até 12% para não cortar a frase no meio
 ESTILO_ASS = (
     "Style: Viela,Arial Black,68,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,"
     "0,0,0,0,100,100,0,0,3,14,0,2,50,50,430,1"
 )
 PAUSA_SEM_PISCAR_S = 0.35
-TITULOS_LONGOS = [
-    "{nome} no GTA 6: os melhores momentos da live | Parte {parte}",
-    "GTA 6 com {nome}: momentos insanos da live | Parte {parte}",
-    "{nome} jogando GTA 6: o melhor da live | Parte {parte}",
-]
 PROB_MINIMA_PORTUGUES = 0.7
 CONFIANCA_MINIMA_TRANSCRICAO = -1.0
 FOLGA_MAXIMA_DO_CORTE = 2.5
-DURACAO_MINIMA_CORTE_S = 20.0
+DURACAO_MINIMA_CORTE_S = 42.5  # Com a abertura narrada, o Short completo fica com pelo menos 45 s
 
 
 def _normalizar(texto: str) -> str:
@@ -241,7 +239,23 @@ def gerar_gancho(segmentos: list, streamer: str) -> str:
             melhor, melhor_nota = texto, nota
     if not melhor:
         return f"OLHA O QUE {nome_falado(streamer).upper()} FEZ!"
-    return re.sub(r"[.,;:]+$", "", " ".join(melhor.split()[:6])).upper()
+    return _titulo_curto(melhor)
+
+
+PALAVRAS_SOLTAS = {
+    "a", "o", "as", "os", "um", "uma", "de", "da", "do", "das", "dos", "e", "que", "me", "te", "se", "lhe",
+    "em", "no", "na", "nos", "nas", "pra", "pro", "para", "por", "com", "mas", "ou", "ao", "aos", "meu", "minha",
+    "seu", "sua", "esse", "essa", "este", "esta", "isso", "vou", "vai", "eu",
+}
+
+
+def _titulo_curto(texto: str, limite: int = 6) -> str:
+    """Fecha o título no fim da frase e nunca o deixa terminar numa palavra que pede continuação."""
+    frase = re.split(r"(?<=[.!?…])\s+", texto.strip())[0]
+    termos = (frase if len(frase.split()) >= 4 else texto).split()[:limite]
+    while len(termos) > 3 and re.sub(r"[^\w]", "", termos[-1].lower()) in PALAVRAS_SOLTAS:
+        termos.pop()
+    return re.sub(r"[.,;:…]+$", "", " ".join(termos)).upper()
 
 
 def quebrar_linhas(texto: str, max_chars: int = 18, max_linhas: int = 2) -> list:
@@ -302,41 +316,77 @@ def selecionar_melhores_cortes(segmentos: list, duracao_alvo: float = 66.0, max_
     return escolhidos
 
 
-def planejar_longos(duracao_total: float, quantidade: int = 2, alvo: float = 600.0, minimo: float = 480.0,
-                    margem: float = 20.0) -> list:
-    """Divide a gravação em partes sem repetição. Devolve (início, duração) de cada vídeo longo."""
-    for partes in range(quantidade, 0, -1):
-        fatia = (duracao_total - margem) / partes
-        if fatia >= minimo:
-            return [(round(margem + i * fatia, 3), round(min(alvo, fatia - margem), 3)) for i in range(partes)]
-    return []
+def melhor_trecho(segmentos: list, duracao: float, bloqueios=(), fim_maximo: float = None):
+    """
+    O trecho contínuo de pelo menos `duracao` segundos com a fala mais intensa, sem telas pretas.
+    Termina no fim de uma frase quando ela acaba logo depois. Devolve (início, fim, falas) ou None.
+    """
+    melhor = None
+    for i, seg in enumerate(segmentos):
+        inicio = max(0.0, seg["start"] - 0.5)
+        fim = inicio + duracao
+        dentro = [s for s in segmentos[i:] if s["start"] < fim]
+        fim_da_frase = [s["end"] for s in dentro if fim <= s["end"] <= inicio + duracao * FOLGA_FIM_DA_FRASE]
+        fim = max(fim_da_frase) if fim_da_frase else fim
+        if fim_maximo is not None and fim > fim_maximo:
+            break
+        if any(inicio < b_fim and fim > b_ini for b_ini, b_fim in bloqueios):
+            continue
+        fala = sum(min(s["end"], fim) - s["start"] for s in dentro)
+        if fala < duracao * FALA_MINIMA_DO_TRECHO:
+            continue
+        nota = _nota_corte(dentro)
+        if melhor is None or nota > melhor[0]:
+            melhor = (nota, round(inicio, 3), round(fim, 3), dentro)
+    return None if melhor is None else melhor[1:]
 
 
 def trechos_sem_bloqueios(inicio: float, duracao: float, bloqueios=(), minimo: float = 0.5) -> list:
-    """Mantém a parte escolhida da live, retirando as telas pretas."""
+    """Mantém a parte escolhida do vídeo, retirando as telas pretas."""
     return [(a, b) for a, b in _subtrair_bloqueios([(inicio, inicio + duracao)], bloqueios) if b - a >= minimo]
 
 
-def montar_publicacao_longa(streamer: str, parte: int, semente: int = 0) -> dict:
-    """Prepara título e descrição do vídeo longo, com os créditos do criador."""
+def _rotulo_do_capitulo(texto: str, palavras: int = 7) -> str:
+    return re.sub(r"[.,;:!?…]+$", "", " ".join(str(texto).split()[:palavras]))
+
+
+def _lista_de_capitulos(capitulos) -> str:
+    """Capítulos com horário na descrição: o YouTube só os reconhece com 3 ou mais, o primeiro em 00:00."""
+    marcos = []
+    for instante, texto in capitulos:
+        if texto and (not marcos or instante - marcos[-1][0] >= 10):
+            marcos.append((instante, texto))
+    if len(marcos) < 3 or marcos[0][0] > 0.5:
+        return ""
+    linhas = [f"{int(i // 60):02d}:{int(i % 60):02d} {_rotulo_do_capitulo(t)}" for i, t in marcos]
+    return "Capítulos:\n" + "\n".join(linhas)
+
+
+def montar_publicacao(gancho: str, streamer: str, semente: int = 0, titulo_roteiro: str = None, resumo: str = None,
+                      url: str = None) -> dict:
+    """Prepara título e descrição com crédito e link do vídeo original e hashtags variadas."""
     nome = nome_falado(streamer)
-    modelo = TITULOS_LONGOS[semente % len(TITULOS_LONGOS)]
-    titulo = modelo.format(nome=nome, parte=parte)[:98]
+    sufixo = " #Shorts"
+    titulo = f"{(titulo_roteiro or gancho)[:98 - len(sufixo)].strip()}{sufixo}"
+    hashtags = HASHTAGS_ROTATIVAS[semente % len(HASHTAGS_ROTATIVAS)]
+    credito = f"Créditos: vídeo de {nome}" + (f" — {url}" if url else "")
     descricao = (
-        f"{titulo}\n\nCréditos: Live de {nome}\n\n"
-        f"Inscreva-se no canal Viela Vice para os melhores momentos de GTA 6!\n\n#GTA6 #GTAVI #VielaVice #Gameplay"
+        f"{resumo or gancho}\n\n{credito}\n\n"
+        f"Inscreva-se no canal Viela Vice para os melhores momentos de GTA 6!\n\n{hashtags}"
     )
     return {"titulo": titulo, "descricao": descricao}
 
 
-def montar_publicacao(gancho: str, streamer: str, semente: int = 0) -> dict:
-    """Prepara título e descrição com créditos ao criador e hashtags variadas."""
-    nome = nome_falado(streamer)
-    sufixo = " #Shorts"
-    titulo = f"{gancho[:98 - len(sufixo)].strip()}{sufixo}"
-    hashtags = HASHTAGS_ROTATIVAS[semente % len(HASHTAGS_ROTATIVAS)]
+def montar_publicacao_compilacao(fontes: list, titulo_roteiro: str = None, resumo: str = None, capitulos=()) -> dict:
+    """
+    Título e descrição do Top da semana: resumo narrado, capítulos com horário e o crédito,
+    com link, de cada vídeo original usado. "fontes" traz {"streamer", "url"} na ordem do vídeo.
+    """
+    titulo = (titulo_roteiro or TITULO_COMPILACAO.format(quantidade=len(fontes)))[:98]
+    lista = _lista_de_capitulos(capitulos)
+    creditos = "\n".join(f"{i}. {nome_falado(f['streamer'])} — {f['url']}" for i, f in enumerate(fontes, 1))
     descricao = (
-        f"{gancho}\n\nCréditos: Live de {nome}\n\n"
-        f"Inscreva-se no canal Viela Vice para os melhores momentos de GTA 6!\n\n{hashtags}"
+        f"{resumo or titulo}\n\n" + (f"{lista}\n\n" if lista else "") + f"Créditos dos vídeos originais:\n{creditos}\n\n"
+        f"Inscreva-se no canal Viela Vice para os melhores momentos de GTA 6!\n\n#GTA6 #GTAVI #VielaVice #Gameplay"
     )
     return {"titulo": titulo, "descricao": descricao}

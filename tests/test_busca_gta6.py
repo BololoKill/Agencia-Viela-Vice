@@ -1,96 +1,158 @@
 """
-SPEC-004: a busca prioriza lives no ar e vídeos novos de GTA 6.
+SPEC-004: a matéria-prima são os vídeos de GTA 6 em português mais vistos da semana; lives não são mais gravadas.
 """
 import unittest
-from datetime import datetime, timedelta
 from unittest import mock
 
 from apoio import AmbienteIsolado
-from src.pipeline import downloader, searcher, transcriber
+from src.pipeline import downloader, estado, searcher, transcriber
 
 
-def data_recente(dias=1):
-    return (datetime.now() - timedelta(days=dias)).strftime("%Y%m%d")
+def entrada(video_id, titulo="GTA 6 gameplay em português", visualizacoes=1000, canal=None, duracao=3600, **extra):
+    return {"id": video_id, "title": titulo, "view_count": visualizacoes, "channel": canal or f"Canal {video_id}",
+            "duration": duracao, "live_status": extra.pop("live_status", "not_live"), **extra}
 
 
 class BaseBusca(AmbienteIsolado):
 
-    def _configurar(self, lives=(), novos=(), reserva=(), detalhes=None):
+    def _configurar(self, semana=(), mes=(), detalhes=None):
         detalhes = detalhes or {}
 
         def listar(url):
-            if "ytsearch" in url:
-                return list(reserva)
-            if searcher.FILTRO_LIVE in url:
-                return list(lives)
-            return list(novos)
+            if searcher.FILTRO_MAIS_VISTOS_SEMANA in url:
+                return list(semana)
+            if searcher.FILTRO_MAIS_VISTOS_MES in url:
+                return list(mes)
+            return []
 
         def detalhar(url):
             video_id = url.rsplit("=", 1)[-1]
-            return detalhes.get(video_id, {"upload_date": data_recente(), "duration": 900, "live_status": "not_live"})
+            return detalhes.get(video_id, {"duration": 3600, "live_status": "not_live", "channel": f"Canal {video_id}"})
 
         for nome, efeito in (("_listar", listar), ("_detalhar", detalhar)):
             patcher = mock.patch.object(searcher, nome, side_effect=efeito)
             patcher.start()
             self.addCleanup(patcher.stop)
+        # A ordem e os filtros são testados com números pequenos; o mínimo de visualizações tem teste próprio
+        patcher = mock.patch.object(searcher, "VISUALIZACOES_MINIMAS", 0)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _ids(self, quantidade=5, **kw):
+        return [v["id"] for v in searcher.buscar_videos_virais(quantidade, **kw)]
 
 
-class TestPrioridade(BaseBusca):
+class TestMaisVistosDaSemana(BaseBusca):
 
-    def test_live_de_gta6_no_ar_vem_primeiro(self):
-        self._configurar(
-            lives=[{"id": "live1", "title": "GTA 6 AO VIVO! JOGANDO PELA PRIMEIRA VEZ", "live_status": "is_live"}],
-            novos=[{"id": "novo1", "title": "GTA 6 gameplay em português", "duration": 900}],
-        )
-        video = searcher.buscar_melhor_live()
-        self.assertEqual((video["id"], video["origem"], video["ao_vivo"]), ("live1", "live_gta6", True))
+    def test_do_mais_visto_para_o_menos_visto(self):
+        self._configurar(semana=[entrada("b", visualizacoes=500), entrada("a", visualizacoes=9_000_000), entrada("c", visualizacoes=40_000)])
+        self.assertEqual(self._ids(), ["a", "c", "b"])
 
-    def test_video_novo_de_gta6_vence_o_gta_rp(self):
-        self._configurar(
-            novos=[{"id": "novo1", "title": "GTA 6 gameplay em português", "duration": 900}],
-            reserva=[{"id": "rp1", "title": "GTA RP treta", "duration": 900}],
-        )
-        video = searcher.buscar_melhor_live()
-        self.assertEqual((video["id"], video["origem"], video["ao_vivo"]), ("novo1", "novo_gta6", False))
+    def test_video_traz_criador_visualizacoes_e_origem_viral(self):
+        self._configurar(semana=[entrada("a", visualizacoes=8_196_705, canal="PAULINHO O LOKO")])
+        video = searcher.buscar_videos_virais(1)[0]
+        self.assertEqual((video["streamer"], video["visualizacoes"], video["origem"], video["ao_vivo"]),
+                         ("PAULINHO O LOKO", 8_196_705, "viral", False))
+        self.assertEqual(video["url"], "https://www.youtube.com/watch?v=a")
 
-    def test_gta_rp_continua_como_reserva(self):
-        self._configurar(reserva=[{"id": "rp1", "title": "GTA RP treta", "duration": 900}])
-        self.assertEqual(searcher.buscar_melhor_live()["origem"], "gta_rp")
+    def test_um_video_por_criador(self):
+        self._configurar(semana=[entrada("a1", visualizacoes=900, canal="Paulinho"), entrada("a2", visualizacoes=800, canal="Paulinho"),
+                                 entrada("b", visualizacoes=700, canal="Alanzoka")])
+        self.assertEqual(self._ids(), ["a1", "b"])
+
+    def test_gravacao_de_live_ja_encerrada_conta_como_video(self):
+        self._configurar(semana=[entrada("vod", titulo="GTA 6 É AGORA, O INÍCIO DA GAMEPLAY", duracao=40815, live_status="was_live")])
+        self.assertEqual(self._ids(), ["vod"])
+
+    def test_live_no_ar_ou_agendada_fica_de_fora(self):
+        self._configurar(semana=[entrada("ao_vivo", live_status="is_live"), entrada("agendada", live_status="is_upcoming"),
+                                 entrada("processando", live_status="post_live"), entrada("ok")])
+        self.assertEqual(self._ids(), ["ok"])
+
+    def test_video_em_outro_idioma_fica_de_fora(self):
+        """Títulos reais da busca de 24/11: os gringos têm mais visualizações, mas o canal é em português."""
+        self._configurar(semana=[
+            entrada("mrbeast", titulo="I Survived 100 Hours In GTA 6", visualizacoes=69_690_773),
+            entrada("speed", titulo="🔴 BEATING GTA 6 RIGHT NOW 100% (FINAL MISSION)", visualizacoes=24_482_648),
+            entrada("carry", titulo="CARRYMINATI PLAYS GTA VI | NO PROMOTIONS", visualizacoes=18_636_211),
+            entrada("windah", titulo="GTA VI SIAP TAMAT 100%.... GAMEPLAY #1", visualizacoes=15_554_824),
+            entrada("cory", titulo="GTA 6", visualizacoes=11_520_636),
+            entrada("ign", titulo="GTA 6 Review", visualizacoes=8_409_073),
+            entrada("tmartn", titulo="Grand Theft Auto 6 - Part 1 - The Beginning", visualizacoes=4_725_813),
+            entrada("alanzoka", titulo="BEM VINDO A LEONIDA! - GRAND THEFT AUTO 6 - Parte 1", visualizacoes=5_736_574),
+            entrada("gameplayrj", titulo="GTA 6 É AGORA , O INICIO DA GAMEPLAY", visualizacoes=10_999_401),
+            entrada("coringa", titulo="GTA VI: DIA 2 🔴 CORINGA AO VIVO", visualizacoes=3_876_390),
+            entrada("brksedu", titulo="GTA 6 #1 - Gameplay Start!!! | Grand Theft Auto VI in Portuguese on PS", visualizacoes=3_805_135),
+        ])
+        self.assertEqual(self._ids(quantidade=10), ["gameplayrj", "alanzoka", "coringa", "brksedu"])
+
+    def test_video_curto_ou_short_fica_de_fora(self):
+        self._configurar(semana=[entrada("curto", duracao=200), entrada("medio", duracao=searcher.DURACAO_MINIMA_S - 1),
+                                 entrada("bom", duracao=searcher.DURACAO_MINIMA_S)])
+        self.assertEqual(self._ids(), ["bom"])
+
+    def test_video_com_poucas_visualizacoes_nao_e_viral(self):
+        """Regressão: a busca do mês trouxe um vídeo com 797 visualizações para o Top da semana."""
+        self._configurar(semana=[entrada("viral", visualizacoes=3_261_149), entrada("pequeno", visualizacoes=797)])
+        with mock.patch.object(searcher, "VISUALIZACOES_MINIMAS", 100_000):
+            self.assertEqual(self._ids(), ["viral"])
+
+    def test_nosso_proprio_canal_fica_de_fora(self):
+        self._configurar(semana=[entrada("nosso", canal="Viela Vice"), entrada("outro")])
+        self.assertEqual(self._ids(), ["outro"])
+
+    def test_video_ja_aproveitado_nao_repete(self):
+        self.historico_file.write_text("a\n", encoding="utf-8")
+        self._configurar(semana=[entrada("a", visualizacoes=900), entrada("b", visualizacoes=800)])
+        self.assertEqual(self._ids(), ["b"])
+
+    def test_videos_tentados_no_ciclo_sao_ignorados(self):
+        self._configurar(semana=[entrada("a", visualizacoes=900), entrada("b", visualizacoes=800)])
+        self.assertEqual(self._ids(ignorar={"a"}), ["b"])
+
+    def test_video_em_quarentena_e_ignorado(self):
+        for _ in range(estado.MAX_TENTATIVAS_VIDEO):
+            estado.registrar_falha("ruim", {"categoria": "render", "mensagem": "x"})
+        self._configurar(semana=[entrada("ruim", visualizacoes=900), entrada("bom", visualizacoes=800)])
+        self.assertEqual(self._ids(), ["bom"])
+
+    def test_semana_aproveitada_completa_com_os_mais_vistos_do_mes(self):
+        self._configurar(semana=[entrada("semana")], mes=[entrada("mes1", visualizacoes=5), entrada("semana")])
+        self.assertEqual(self._ids(), ["semana", "mes1"])
+
+    def test_semana_suficiente_nem_consulta_o_mes(self):
+        self._configurar(semana=[entrada("a"), entrada("b")])
+        self.assertEqual(self._ids(quantidade=2), ["a", "b"])
+        self.assertFalse(any(searcher.FILTRO_MAIS_VISTOS_MES in str(c) for c in searcher._listar.call_args_list))
+
+    def test_busca_sem_duracao_ou_canal_consulta_a_pagina_do_video(self):
+        self._configurar(semana=[{"id": "a", "title": "GTA 6 gameplay em português", "view_count": 9}],
+                         detalhes={"a": {"duration": 1200, "uploader": "Canal da Página", "live_status": "not_live"}})
+        video = searcher.buscar_videos_virais(1)[0]
+        self.assertEqual((video["streamer"], video["duration"]), ("Canal da Página", 1200))
+
+    def test_busca_completa_nao_faz_consulta_extra(self):
+        self._configurar(semana=[entrada("a")])
+        self._ids()
+        searcher._detalhar.assert_not_called()
+
+    def test_busca_usa_o_filtro_de_mais_vistos(self):
+        self._configurar(semana=[entrada("a")])
+        self._ids(quantidade=1)
+        self.assertTrue(all(searcher.FILTRO_MAIS_VISTOS_SEMANA in c.args[0] for c in searcher._listar.call_args_list))
 
 
 class TestFiltros(BaseBusca):
 
-    def test_ignora_transmissoes_fora_do_tema(self):
-        self._configurar(lives=[
-            {"id": "a", "title": "GTA 6 AO VIVO: CONTAGEM REGRESSIVA PARA O LANÇAMENTO", "live_status": "is_live"},
-            {"id": "b", "title": "MARATONA ANTES DO GTA 6! - GTA 5 ENHANCED", "live_status": "is_live"},
-            {"id": "c", "title": "GTA 6 LIVE - New Zealand Launch Stream", "live_status": "is_live"},
-            {"id": "d", "title": "🎮 GTA 6 AO VIVO! O JOGO MAIS ESPERADO DA HISTÓRIA!", "live_status": "is_live"},
+    def test_ignora_titulos_fora_do_tema(self):
+        self._configurar(semana=[
+            entrada("a", titulo="GTA 6: CONTAGEM REGRESSIVA PARA O LANÇAMENTO", visualizacoes=9),
+            entrada("b", titulo="MARATONA ANTES DO GTA 6! - GTA 5 ENHANCED", visualizacoes=8),
+            entrada("c", titulo="RANK COM CHAT - PRE GTA 6 - FREE FIRE AO VIVO!!!", visualizacoes=7),
+            entrada("d", titulo="🎮 GTA 6: O JOGO MAIS ESPERADO DA HISTÓRIA!", visualizacoes=6),
+            entrada("tv", titulo="Reportagem Do FANTÁSTICO Sobre GTA 6 - 22/11/2026", visualizacoes=5),
         ])
-        self.assertEqual(searcher.buscar_melhor_live()["id"], "d")
-
-    def test_ignora_live_de_outro_jogo_que_cita_gta6(self):
-        self._configurar(lives=[
-            {"id": "ff", "title": "RANK COM CHAT - PRE GTA 6 - FREE FIRE AO VIVO!!!", "live_status": "is_live"},
-            {"id": "ok", "title": "JOGANDO GTA 6 AO VIVO NO BRASIL", "live_status": "is_live"},
-        ])
-        self.assertEqual(searcher.buscar_melhor_live()["id"], "ok")
-
-    def test_video_antigo_nao_conta_como_novo(self):
-        self._configurar(
-            novos=[{"id": "velho", "title": "GTA 6 gameplay em português", "duration": 900}],
-            detalhes={"velho": {"upload_date": data_recente(30), "duration": 900, "live_status": "not_live"}},
-            reserva=[{"id": "rp1", "title": "GTA RP treta", "duration": 900}],
-        )
-        self.assertEqual(searcher.buscar_melhor_live()["id"], "rp1")
-
-    def test_video_ja_processado_nao_repete(self):
-        self.historico_file.write_text("novo1\n", encoding="utf-8")
-        self._configurar(
-            novos=[{"id": "novo1", "title": "GTA 6 gameplay em português", "duration": 900},
-                   {"id": "novo2", "title": "GTA VI novidades do jogo", "duration": 900}],
-        )
-        self.assertEqual(searcher.buscar_melhor_live()["id"], "novo2")
+        self.assertEqual(self._ids(), ["d"], "reportagem de TV não é gameplay e a emissora derruba o vídeo")
 
     def test_reconhece_as_grafias_do_jogo(self):
         for titulo in ("GTA 6 ao vivo", "GTA VI gameplay", "GTA6 novidades", "Grand Theft Auto VI no Brasil"):
@@ -99,7 +161,51 @@ class TestFiltros(BaseBusca):
             self.assertFalse(searcher.titulo_e_gta6(titulo), titulo)
 
 
-class TestGravacaoDeLive(AmbienteIsolado):
+class TestYoutube(BaseBusca):
+
+    def test_youtube_em_pausa_nao_busca_nada(self):
+        self._configurar(semana=[entrada("a")])
+        searcher.pausar_youtube(600)
+        self.assertEqual(searcher.buscar_videos_virais(5), [])
+        searcher._listar.assert_not_called()
+
+    def test_youtube_volta_quando_a_pausa_termina(self):
+        self._configurar(semana=[entrada("a")])
+        searcher.pausar_youtube(-1)
+        self.assertEqual(self._ids(), ["a"])
+
+    def test_bloqueio_do_youtube_e_informado(self):
+        self._configurar()
+        searcher._listar.side_effect = RuntimeError("Sign in to confirm you're not a bot")
+        with self.assertRaises(RuntimeError):
+            searcher.buscar_videos_virais(5)
+
+    def test_caos_rate_limit_aparece_em_vez_de_fingir_que_nao_ha_videos(self):
+        self._configurar()
+        searcher._listar.side_effect = RuntimeError("HTTP Error 429: Too Many Requests")
+        with self.assertRaisesRegex(RuntimeError, "429"):
+            searcher.buscar_videos_virais(5)
+
+    def test_falha_isolada_de_uma_busca_nao_para_as_outras(self):
+        self._configurar(semana=[entrada("a")])
+        original = searcher._listar.side_effect
+        chamadas = []
+
+        def instavel(url):
+            chamadas.append(url)
+            if len(chamadas) == 1:
+                raise RuntimeError("instável")
+            return original(url)
+
+        searcher._listar.side_effect = instavel
+        self.assertEqual(self._ids(), ["a"])
+
+    def test_nao_busca_nem_grava_mais_lives(self):
+        for nome in ("buscar_melhor_live", "_buscar_live_prioritaria", "_buscar_live_gta6", "_consultar_live_do_canal", "adiar_live"):
+            self.assertFalse(hasattr(searcher, nome), nome)
+
+
+class TestDownloadDoVideo(AmbienteIsolado):
 
     def _opcoes_usadas(self, **kw):
         instancia = mock.MagicMock()
@@ -107,110 +213,42 @@ class TestGravacaoDeLive(AmbienteIsolado):
         destino.write_bytes(b"x")
         instancia.__enter__.return_value.extract_info.return_value = {"id": "x"}
         instancia.__enter__.return_value.prepare_filename.return_value = str(destino)
-        with mock.patch.object(downloader.yt_dlp, "YoutubeDL", return_value=instancia) as ydl:
+        with mock.patch.object(downloader.yt_dlp, "YoutubeDL", return_value=instancia) as ydl, \
+                mock.patch.object(downloader, "_arquivo_completo", return_value=True):
             downloader.baixar_video("https://youtu.be/x", self.bruto_dir, **kw)
         return ydl.call_args.args[0]
 
-    def test_live_e_gravada_por_tempo_limitado(self):
-        opcoes = self._opcoes_usadas(ao_vivo=True, duracao_captura=600)
-        self.assertEqual(opcoes["external_downloader_args"]["ffmpeg_i"], ["-t", "600"])
-
-    def test_live_junta_video_e_audio_separados(self):
-        """Regressão: lives só oferecem vídeo e áudio em faixas separadas."""
-        opcoes = self._opcoes_usadas(ao_vivo=True, duracao_captura=600)
+    def test_video_curto_e_baixado_inteiro_com_imagem_e_som(self):
+        opcoes = self._opcoes_usadas()
+        self.assertNotIn("external_downloader_args", opcoes)
+        self.assertNotIn("download_ranges", opcoes)
         self.assertIn("bestvideo[height<=720]+bestaudio", opcoes["format"])
 
-    def test_video_comum_e_baixado_inteiro(self):
-        self.assertNotIn("external_downloader_args", self._opcoes_usadas())
+    def test_download_nao_aceita_mais_gravacao_de_live(self):
+        with self.assertRaises(TypeError):
+            downloader.baixar_video("https://youtu.be/x", self.bruto_dir, ao_vivo=True)
 
-
-class TestTituloDaTwitch(unittest.TestCase):
-
-    def test_titulos_reais_de_gta_6_sao_aceitos(self):
-        for titulo in ("VICE CITY BABYYYYYYYYYYY - JOGANDO NO PS5 PRO", "GTA 6. (jogando no PS5)",
-                       "182 / GTA 6 VAMOS NESSA UIA", "+18 SPEEDRUN DE GTA VI - !exitlag"):
-            self.assertTrue(searcher.titulo_twitch_no_tema(titulo), titulo)
-
-    def test_outros_conteudos_sao_recusados(self):
-        for titulo in ("368 | DIA MUNDIAL DA PISCADA", "RERUN: GTA 6 no lobby", "GTA V RP na cidade alta", "", None):
-            self.assertFalse(searcher.titulo_twitch_no_tema(titulo), titulo)
-
-
-class TestLivesDaTwitch(AmbienteIsolado):
-
-    def setUp(self):
-        super().setUp()
-        for alvo, nome, valor in ((searcher, "CANAIS_TWITCH", ["alanzoka", "cellbit"]),
-                                  (searcher.random, "shuffle", lambda _lista: None)):
-            patcher = mock.patch.object(alvo, nome, valor)
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        patcher = mock.patch.object(searcher, "_listar", return_value=[])
-        self.listar = patcher.start()
-        self.addCleanup(patcher.stop)
-
-    @staticmethod
-    def _live(canal, titulo="GTA 6 ao vivo", stream="123"):
-        return {"id": stream, "description": titulo, "uploader": canal.capitalize(), "uploader_id": canal}
-
-    def _responder(self, **lives):
-        self.consultar_twitch.side_effect = lambda canal: lives.get(canal)
-
-    def test_streamer_em_live_de_gta_6_e_escolhido_antes_do_youtube(self):
-        self._responder(alanzoka=self._live("alanzoka", "VICE CITY BABY"))
-        video = searcher.buscar_melhor_live()
-        self.assertEqual((video["origem"], video["streamer"], video["ao_vivo"]), ("live_twitch", "Alanzoka", True))
-        self.assertEqual(video["url"], "https://www.twitch.tv/alanzoka")
-        self.listar.assert_not_called()
-
-    def test_vale_para_qualquer_canal_da_lista(self):
-        self._responder(cellbit=self._live("cellbit"))
-        self.assertEqual(searcher.buscar_melhor_live()["streamer"], "Cellbit")
-
-    def test_live_de_outro_jogo_segue_para_o_youtube(self):
-        self._responder(alanzoka=self._live("alanzoka", "Jogando Minecraft"))
-        self.assertIsNone(searcher.buscar_melhor_live())
-        self.listar.assert_called()
-
-    def test_mesma_transmissao_nao_e_gravada_duas_vezes(self):
-        self._responder(alanzoka=self._live("alanzoka", stream="999"), cellbit=self._live("cellbit", stream="555"))
-        searcher.registrar_historico("twitch_999")
-        self.assertEqual(searcher.buscar_melhor_live()["id"], "twitch_555")
-
-    def test_falha_em_um_canal_nao_impede_os_outros(self):
-        respostas = {"alanzoka": RuntimeError("instável"), "cellbit": self._live("cellbit")}
-
-        def consultar(canal):
-            if isinstance(respostas[canal], Exception):
-                raise respostas[canal]
-            return respostas[canal]
-
-        self.consultar_twitch.side_effect = consultar
-        self.assertEqual(searcher.buscar_melhor_live()["streamer"], "Cellbit")
-
-    def test_bloqueio_do_youtube_nao_afeta_a_twitch(self):
-        self._responder(cellbit=self._live("cellbit"))
-        self.listar.side_effect = RuntimeError("Sign in to confirm you're not a bot")
-        self.assertEqual(searcher.buscar_melhor_live()["origem"], "live_twitch")
-
-
-class TestConsultaDoCanalNaTwitch(unittest.TestCase):
-
-    def _consultar(self, erro):
-        ydl = mock.MagicMock()
-        ydl.__enter__.return_value.extract_info.side_effect = erro
-        with mock.patch.object(searcher.yt_dlp, "YoutubeDL", return_value=ydl):
-            return searcher._consultar_canal_twitch("alanzoka")
-
-    def test_canal_offline_nao_e_erro(self):
-        self.assertIsNone(self._consultar(RuntimeError("alanzoka: The channel is not currently live")))
-
-    def test_canal_inexistente_nao_e_erro(self):
-        self.assertIsNone(self._consultar(RuntimeError("alanzoka does not exist")))
-
-    def test_falha_de_rede_e_informada(self):
-        with self.assertRaises(RuntimeError):
-            self._consultar(RuntimeError("Connection reset"))
+    def test_video_viral_baixa_so_o_trecho_analisado(self):
+        """Os virais chegam a ter 11 horas: com a internet lenta, só os 6 min analisados descem."""
+        instancia = mock.MagicMock()
+        instancia.__enter__.return_value.extract_info.return_value = {"id": "x"}
+        instancia.__enter__.return_value.prepare_filename.side_effect = (
+            lambda _info: str(self.bruto_dir / f"parte{instancia.__enter__.return_value.prepare_filename.call_count}.webm"))
+        with mock.patch.object(downloader.yt_dlp, "YoutubeDL", return_value=instancia) as ydl, \
+                mock.patch.object(downloader, "_duracoes", return_value={"video": 360.0, "audio": 360.0}), \
+                mock.patch.object(downloader, "_arquivo_completo", return_value=True), \
+                mock.patch.object(downloader, "executar_ffmpeg") as juntar:
+            arquivo = downloader.baixar_video("https://youtu.be/x", self.bruto_dir, trecho=(4081.5, 360.0))
+        opcoes = [c.args[0] for c in ydl.call_args_list]
+        self.assertEqual([o["format"] for o in opcoes], [downloader.FORMATO_IMAGEM_TRECHO, downloader.FORMATO_SOM_TRECHO])
+        for o in opcoes:
+            self.assertEqual(list(o["download_ranges"]({"duration": 40815, "id": "x"}, None)),
+                             [{"start_time": 4081.5, "end_time": 4441.5}])
+        self.assertIn("bestvideo[height<=720]", opcoes[0]["format"])
+        self.assertTrue(opcoes[1]["format"].startswith("bestaudio"))
+        argumentos = juntar.call_args.args[0]
+        self.assertEqual(argumentos[argumentos.index("-c") + 1], "copy")
+        self.assertEqual(arquivo.name, "live_bruta.mp4")
 
 
 class TestIdiomaDoAudio(AmbienteIsolado):
@@ -283,3 +321,7 @@ class TestIdiomaDeCadaFala(AmbienteIsolado):
         with mock.patch.object(transcriber, "_obter_modelo") as obter:
             self.assertEqual(transcriber.identificar_idioma_dos_segmentos("a.wav", []), [])
         obter.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -10,7 +10,7 @@ from unittest import mock
 
 import src.utils as utils
 import src.web.app as web
-from src.pipeline import estado, renderer, searcher, worker
+from src.pipeline import estado, renderer, roteiro, searcher, verificador, worker
 from src.youtube import cota
 
 
@@ -40,6 +40,9 @@ class AmbienteIsolado(unittest.TestCase):
             (worker, "EXPORT_DIR", self.export_dir),
             (worker, "VIDEO_BRUTO_DIR", self.bruto_dir),
             (worker, "METADADOS_FILE", self.raiz / "metadados_cortes.json"),
+            (worker, "DESCARTADOS_FILE", self.raiz / "descartados.json"),
+            (worker, "AGENDADOS_FILE", self.agendados_file),
+            (worker, "TRECHOS_SEM_FALA_FILE", self.raiz / "trechos_sem_fala.json"),
             (web, "METADADOS_FILE", self.raiz / "metadados_cortes.json"),
             (cota, "COTAS_FILE", self.raiz / "cotas_youtube.json"),
             (renderer, "VIDEO_BRUTO_DIR", self.bruto_dir),
@@ -50,23 +53,32 @@ class AmbienteIsolado(unittest.TestCase):
             (web, "DESCARTADOS_FILE", self.raiz / "descartados.json"),
             (web, "HISTORICO_FILE", self.historico_file),
             (web, "AFILIADOS_FILE", self.raiz / "afiliados.json"),
-            (web, "FINANCEIRO_FILE", self.raiz / "financeiro.json"),
         ]
         for modulo, nome, valor in alvos:
             patcher = mock.patch.object(modulo, nome, valor)
             patcher.start()
             self.addCleanup(patcher.stop)
 
+        # Os números do canal no painel nunca vêm do YouTube de verdade nos testes.
+        patcher = mock.patch.object(web, "estatisticas_do_canal", return_value={})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
         # Nenhum teste consulta o YouTube de verdade.
         patcher = mock.patch.object(cota, "consultar_envios_youtube", return_value=[])
         self.consultar_youtube = patcher.start()
         self.addCleanup(patcher.stop)
 
-        # Nenhum teste consulta a Twitch de verdade.
-        patcher = mock.patch.object(searcher, "_consultar_canal_twitch", return_value=None)
-        self.consultar_twitch = patcher.start()
-        self.addCleanup(patcher.stop)
+
         self.addCleanup(cota._reservas.clear)
+
+        # A pausa do YouTube e as pausas das IAs não passam de um teste para o outro.
+        for dicionario, valores in ((searcher._fontes, {"youtube_pausado_ate": 0.0}),
+                                    (verificador._ia, {"pausada_ate": 0.0}),
+                                    (roteiro._ia, {"pausada_ate": 0.0})):
+            patcher = mock.patch.dict(dicionario, valores, clear=True)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
 
 def gerar_clipe(destino: Path, duracao: int = 8) -> Path:

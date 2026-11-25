@@ -1,58 +1,54 @@
 """
-Módulo de Varredura e Busca de Conteúdo.
-Prioridade: lives de GTA 6 na Twitch, lives de GTA 6 no YouTube, vídeos novos de GTA 6 e, como reserva, GTA RP.
+Módulo de Busca de Conteúdo.
+O canal dark não grava mais lives: a matéria-prima são os vídeos de GTA 6 em português mais vistos
+da semana no YouTube, no máximo um por criador. Com a semana toda aproveitada, entram os mais vistos do mês.
 """
 import random
 import re
-from datetime import datetime, timedelta
+import time
 from urllib.parse import quote_plus
 import yt_dlp
-from src.config import CANAIS_TWITCH, STREAMERS_BR, DESCOBERTOS_PATH, HISTORICO_FILE
+from src.config import STREAMERS_BR, DESCOBERTOS_PATH, HISTORICO_FILE
 from src.pipeline.estado import classificar_erro, em_quarentena
 from src.utils import load_json_safe, log_terminal
 
 CATEGORIAS_BLOQUEIO = ("rate_limit", "bloqueio_youtube")
-FILTRO_LIVE = "EgJAAQ%253D%253D"
-FILTRO_RECENTES = "CAISAhAB"
-DIAS_RECENTES = 7
-DURACAO_MINIMA_S = 180
-DURACAO_MAXIMA_S = 7200
-RESULTADOS_POR_BUSCA = 12
+# Resultados ordenados por visualizações, só vídeos: publicados nesta semana e, na reserva, neste mês
+FILTRO_MAIS_VISTOS_SEMANA = "CAMSBAgDEAE%253D"
+FILTRO_MAIS_VISTOS_MES = "CAMSBAgEEAE%253D"
+DURACAO_MINIMA_S = 480  # Em vídeos curtos, o Short e o trecho do Top seriam boa parte do vídeo de outro criador
+VISUALIZACOES_MINIMAS = 100_000  # Abaixo disso não é viral: a busca do mês chegou a trazer um vídeo com 797
+RESULTADOS_POR_BUSCA = 20
 STREAMERS_POR_CICLO = 4
-MAX_FALHAS_TWITCH = 3
-AVISOS_CANAL_INDISPONIVEL = ("not currently live", "does not exist")
+PAUSA_YOUTUBE_S = 7200
+CANAL_PROPRIO = "viela vice"
+AINDA_NO_AR = ("is_live", "is_upcoming", "post_live")
 
-CONSULTAS_LIVE_GTA6 = ["GTA 6 ao vivo", "GTA VI ao vivo Brasil", "jogando GTA 6 ao vivo"]
-CONSULTAS_NOVOS_GTA6 = ["GTA 6 gameplay português", "jogando GTA 6", "GTA 6 novidades Brasil"]
+_fontes = {"youtube_pausado_ate": 0.0}
+
+CONSULTAS_VIRAIS = ["GTA 6", "GTA 6 gameplay português", "GTA 6 brasil", "GTA VI português"]
 
 _REGEX_GTA6 = re.compile(r"\bgta\s*-?\s*(?:6|vi)\b|\bgrand theft auto\s*(?:6|vi)\b", re.I)
 _REGEX_GTA5 = re.compile(r"\bgta\s*-?\s*(?:5|v)\b", re.I)
 _REGEX_FORA_DO_TEMA = re.compile(
     r"contagem|countdown|enhanced|\bmods?\b|\bfake\b|conceito|concept|pr[eé][\s-]*gta|antes d[oe] gta"
-    r"|free\s*fire|fortnite|minecraft|roblox|valorant|counter[\s-]*strike|\bcs2\b|league of legends|\blol\b",
+    r"|free\s*fire|fortnite|minecraft|roblox|valorant|counter[\s-]*strike|\bcs2\b|league of legends|\blol\b"
+    # Reportagem de TV não é gameplay e a emissora derruba vídeo com trecho dela (apareceu o Fantástico de 22/11)
+    r"|fant[aá]stico|reportagem|jornal nacional|\bglobo\b|record\s*tv|\bsbt\b|\bband\b",
     re.I
 )
+# Sinal de português no título. Na busca de 24/11 todo viral brasileiro tinha um, e os gringos
+# (IShowSpeed, CarryMinati, Windah, CoryxKenshin) nenhum: sem ele, o vídeo nem é baixado.
 _REGEX_PORTUGUES = re.compile(
-    r"\b(?:ao vivo|jogando|jogo|brasil|br|pt-?br|portugu[eê]s|novidades|novo|nova|primeira|agora|aqui|você|vazou)\b"
+    r"\b(?:ao vivo|jogando|jogo|brasil|brazil|br|pt-?br|portugu[eê]s|portuguese|novidades|novo|nova|primeira|primeiro"
+    r"|agora|aqui|você|vazou|bem vindo|parte|dia|in[ií]cio|zerando|mundo|melhor|olha|muito|esse|essa|isso|n[aã]o"
+    r"|meu|minha|pela|pelo)\b"
     r"|[ãõçáéíóúâêô]", re.I
 )
-_REGEX_TEMA_TWITCH = re.compile(
-    r"\bgta\s*-?\s*(?:6|vi)\b|\bgrand theft auto\s*(?:6|vi)\b|\bvice\s*city\b|\bleonida\b", re.I
-)
-_REGEX_REPRISE = re.compile(r"\brerun\b|\breprise\b", re.I)
-
-
-class _SemMensagens:
-    """Evita que cada canal offline apareça como erro no console."""
-
-    def debug(self, _mensagem):
-        pass
-
-    warning = error = debug
 
 
 def carregar_historico():
-    """Carrega IDs de vídeos já baixados ou processados para evitar duplicidade."""
+    """Carrega IDs de vídeos já aproveitados para evitar duplicidade."""
     if not HISTORICO_FILE.exists():
         return set()
     try:
@@ -71,6 +67,11 @@ def registrar_historico(identificador: str):
         pass
 
 
+def pausar_youtube(segundos: int = PAUSA_YOUTUBE_S):
+    """Respeita um bloqueio do YouTube: a busca descansa e só volta quando a pausa acabar."""
+    _fontes["youtube_pausado_ate"] = time.monotonic() + segundos
+
+
 def titulo_e_gta6(titulo: str) -> bool:
     """Reconhece as grafias de GTA 6 e descarta títulos sobre GTA 5."""
     texto = str(titulo)
@@ -82,14 +83,9 @@ def _no_tema(titulo: str) -> bool:
 
 
 def _titulo_aproveitavel(titulo: str) -> bool:
-    return _no_tema(titulo) and bool(_REGEX_PORTUGUES.search(str(titulo)))
-
-
-def titulo_twitch_no_tema(titulo) -> bool:
-    """Na Twitch o título nem sempre cita o jogo pelo nome: 'Vice City' também vale."""
-    texto = str(titulo or "")
-    return (bool(_REGEX_TEMA_TWITCH.search(texto)) and not _REGEX_REPRISE.search(texto)
-            and not _REGEX_GTA5.search(texto) and not _REGEX_FORA_DO_TEMA.search(texto))
+    """Título de GTA 6 com sinal de português. O áudio ainda é conferido depois do download."""
+    texto = str(titulo)
+    return _no_tema(texto) and bool(_REGEX_PORTUGUES.search(texto))
 
 
 def _url_busca(consulta: str, filtro: str) -> str:
@@ -112,16 +108,9 @@ def _listar(url: str) -> list:
 
 
 def _detalhar(url: str) -> dict:
-    """Confirma data e duração reais de um vídeo candidato."""
+    """Confirma duração e canal de um vídeo candidato."""
     with yt_dlp.YoutubeDL({"skip_download": True, "quiet": True, "no_warnings": True}) as ydl:
         return ydl.extract_info(url, download=False) or {}
-
-
-def _e_recente(upload_date) -> bool:
-    try:
-        return datetime.strptime(str(upload_date), "%Y%m%d") >= datetime.now() - timedelta(days=DIAS_RECENTES)
-    except ValueError:
-        return False
 
 
 def _disponivel(entry: dict, historico: set) -> bool:
@@ -129,16 +118,13 @@ def _disponivel(entry: dict, historico: set) -> bool:
     return bool(vid_id) and vid_id not in historico and _url_video(vid_id) not in historico and not em_quarentena(vid_id)
 
 
-def _montar(entry: dict, streamer, origem: str, duracao=None, ao_vivo: bool = False) -> dict:
-    return {
-        "id": entry["id"],
-        "url": _url_video(entry["id"]),
-        "title": entry.get("title", ""),
-        "streamer": streamer or entry.get("channel") or entry.get("uploader") or "GTA 6",
-        "duration": duracao,
-        "origem": origem,
-        "ao_vivo": ao_vivo,
-    }
+def _nome_do_canal(*fontes) -> str:
+    """Nome do criador para a narração e o crédito, na primeira fonte que o trouxer."""
+    for fonte in fontes:
+        for campo in ("channel", "uploader", "creator"):
+            if (fonte or {}).get(campo):
+                return str(fonte[campo]).strip()
+    return ""
 
 
 class _Consultas:
@@ -162,122 +148,78 @@ class _Consultas:
         return entradas
 
 
-def _consultar_canal_twitch(canal: str):
-    """Devolve os dados da transmissão ou None quando o canal não está ao vivo."""
-    opcoes = {"skip_download": True, "quiet": True, "no_warnings": True, "socket_timeout": 20, "logger": _SemMensagens()}
-    try:
-        with yt_dlp.YoutubeDL(opcoes) as ydl:
-            return ydl.extract_info(f"https://www.twitch.tv/{canal}", download=False)
-    except Exception as e:
-        if any(aviso in str(e) for aviso in AVISOS_CANAL_INDISPONIVEL):
-            return None
-        raise
+def _candidato(entry: dict, historico: set) -> bool:
+    """Vídeo de GTA 6 em português, já publicado, ainda não aproveitado e de outro canal."""
+    if entry.get("live_status") in AINDA_NO_AR or not _titulo_aproveitavel(entry.get("title", "")):
+        return False
+    if not _disponivel(entry, historico) or CANAL_PROPRIO in _nome_do_canal(entry).lower():
+        return False
+    if (entry.get("view_count") or 0) < VISUALIZACOES_MINIMAS:
+        return False
+    duracao = entry.get("duration")
+    return duracao is None or duracao >= DURACAO_MINIMA_S
 
 
-def _buscar_live_twitch(historico: set):
-    """Procura, em todos os canais cadastrados, uma transmissão de GTA 6 ainda não aproveitada."""
-    canais = list(CANAIS_TWITCH)
-    random.shuffle(canais)
-    falhas = 0
-    for canal in canais:
+def _validar(entry: dict):
+    """Completa duração e canal quando a busca não os traz. Devolve None para live, Short ou vídeo inacessível."""
+    detalhe = {}
+    if not entry.get("duration") or not _nome_do_canal(entry):
         try:
-            live = _consultar_canal_twitch(canal)
+            detalhe = _detalhar(_url_video(entry["id"]))
         except Exception as e:
-            falhas += 1
-            log_terminal(f"[BUSCA] Twitch indisponível para {canal}: {classificar_erro(e)['mensagem']}")
-            if falhas >= MAX_FALHAS_TWITCH:
-                return None
-            continue
-        if not live or not titulo_twitch_no_tema(live.get("description")):
-            continue
-        video_id = f"twitch_{live['id']}"
-        if video_id in historico or em_quarentena(video_id):
-            continue
-        return {
-            "id": video_id,
-            "url": f"https://www.twitch.tv/{canal}",
-            "title": live.get("description", ""),
-            "streamer": live.get("uploader") or canal,
-            "duration": None,
-            "origem": "live_twitch",
-            "ao_vivo": True,
-        }
-    return None
-
-
-def _buscar_live_gta6(consultas: _Consultas, historico: set):
-    for consulta in CONSULTAS_LIVE_GTA6:
-        for entry in consultas.listar(_url_busca(consulta, FILTRO_LIVE), consulta):
-            if entry.get("live_status") == "is_live" and _disponivel(entry, historico) \
-                    and _titulo_aproveitavel(entry.get("title", "")):
-                return _montar(entry, None, "live_gta6", ao_vivo=True)
-    return None
-
-
-def _validar_video_novo(entry: dict, streamer):
-    if entry.get("live_status") in ("is_live", "is_upcoming"):
+            if classificar_erro(e)["categoria"] in CATEGORIAS_BLOQUEIO:
+                raise
+            return None
+        if detalhe.get("live_status") in AINDA_NO_AR:
+            return None
+    duracao = entry.get("duration") or detalhe.get("duration") or 0
+    if duracao < DURACAO_MINIMA_S:
         return None
-    try:
-        detalhe = _detalhar(_url_video(entry["id"]))
-    except Exception as e:
-        if classificar_erro(e)["categoria"] in CATEGORIAS_BLOQUEIO:
-            raise
-        return None
-    duracao = detalhe.get("duration") or 0
-    if detalhe.get("live_status") in ("is_live", "is_upcoming") or not _e_recente(detalhe.get("upload_date")):
-        return None
-    if not DURACAO_MINIMA_S <= duracao <= DURACAO_MAXIMA_S:
-        return None
-    return _montar(entry, streamer, "novo_gta6", duracao=duracao)
+    return {
+        "id": entry["id"],
+        "url": _url_video(entry["id"]),
+        "title": entry.get("title", ""),
+        "streamer": _nome_do_canal(entry, detalhe) or "GTA 6",
+        "duration": duracao,
+        "visualizacoes": entry.get("view_count") or detalhe.get("view_count") or 0,
+        "origem": "viral",
+        "ao_vivo": False,
+    }
 
 
-def _buscar_novo_gta6(consultas: _Consultas, historico: set, streamers: list):
-    buscas = [(consulta, None) for consulta in CONSULTAS_NOVOS_GTA6]
-    buscas += [(f"{nome} GTA 6", nome) for nome in streamers[:STREAMERS_POR_CICLO]]
-
-    for consulta, streamer in buscas:
-        for entry in consultas.listar(_url_busca(consulta, FILTRO_RECENTES), consulta):
-            titulo = entry.get("title", "")
-            valido = _no_tema(titulo) if streamer else _titulo_aproveitavel(titulo)
-            if not valido or not _disponivel(entry, historico):
-                continue
-            video = _validar_video_novo(entry, streamer)
-            if video:
-                return video
-    return None
-
-
-def _buscar_gta_rp(consultas: _Consultas, historico: set, streamers: list):
-    for streamer in streamers:
-        for entry in consultas.listar(f"ytsearch3:{streamer} GTA RP", streamer):
-            duracao = entry.get("duration") or 0
-            if _disponivel(entry, historico) and DURACAO_MINIMA_S <= duracao <= DURACAO_MAXIMA_S:
-                return _montar(entry, streamer, "gta_rp", duracao=duracao)
-    return None
-
-
-def buscar_melhor_live():
+def buscar_videos_virais(quantidade: int, ignorar=()) -> list:
     """
-    Seleciona o próximo conteúdo seguindo a prioridade de GTA 6.
-    Bloqueios do YouTube são propagados para não serem confundidos com "nada novo".
+    Os vídeos de GTA 6 em português mais vistos da semana, do mais visto para o menos visto,
+    no máximo um por criador. Se a semana não completar a quantidade, entram os mais vistos do mês.
+    Com o YouTube em pausa por bloqueio anti-robô, nada é buscado até a pausa acabar.
+    "ignorar" recebe os vídeos que já foram tentados neste ciclo.
     """
-    historico = carregar_historico()
+    if time.monotonic() < _fontes["youtube_pausado_ate"]:
+        return []
+    historico = carregar_historico() | set(ignorar)
     descobertos = load_json_safe(DESCOBERTOS_PATH, [])
-    streamers = list(set(STREAMERS_BR + descobertos))
+    streamers = list(set(STREAMERS_BR + (descobertos if isinstance(descobertos, list) else [])))
     random.shuffle(streamers)
-
-    video = _buscar_live_twitch(historico)
-    if video:
-        return video
+    buscas = CONSULTAS_VIRAIS + [f"{nome} GTA 6" for nome in streamers[:STREAMERS_POR_CICLO]]
 
     consultas = _Consultas()
-    video = (
-        _buscar_live_gta6(consultas, historico)
-        or _buscar_novo_gta6(consultas, historico, streamers)
-        or _buscar_gta_rp(consultas, historico, streamers)
-    )
-    if video:
-        return video
-    if consultas.ultimo_erro is not None and consultas.ok == 0:
+    escolhidos, canais = [], set()
+    for filtro in (FILTRO_MAIS_VISTOS_SEMANA, FILTRO_MAIS_VISTOS_MES):
+        candidatos = {}
+        for consulta in buscas:
+            for entry in consultas.listar(_url_busca(consulta, filtro), consulta):
+                if entry.get("id") not in candidatos and _candidato(entry, historico):
+                    candidatos[entry["id"]] = entry
+        for entry in sorted(candidatos.values(), key=lambda e: e.get("view_count") or 0, reverse=True):
+            if entry["id"] in {v["id"] for v in escolhidos}:
+                continue
+            video = _validar(entry)
+            if not video or video["streamer"].lower() in canais:
+                continue
+            escolhidos.append(video)
+            canais.add(video["streamer"].lower())
+            if len(escolhidos) >= quantidade:
+                return escolhidos
+    if not escolhidos and consultas.ultimo_erro is not None and consultas.ok == 0:
         raise consultas.ultimo_erro
-    return None
+    return escolhidos

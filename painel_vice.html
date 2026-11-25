@@ -2,14 +2,15 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>AGÊNCIA VIELA VICE — Sistema 6 Estrelas</title>
+<title>AGÊNCIA VIELA VICE — Canal Dark de GTA 6</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 100vw; height: 100vh; overflow: hidden; background: #090d16; color: #fff; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; }
   #top { height: 58px; flex-shrink: 0; background: #111625; border-bottom: 1px solid #263044; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; z-index: 100; }
   .title { font-size: 16px; font-weight: 800; }
   .sub { font-size: 11px; color: #fbbf24; font-weight: 600; }
-  .metrics { display: flex; gap: 60px; text-align: center; font-size: 12px; }
+  .metrics { display: flex; gap: 48px; text-align: center; font-size: 12px; }
+  .metrics span { display: block; font-size: 10px; color: #94a3b8; margin-top: 1px; }
   .metrics b { display: block; font-size: 14px; margin-top: 2px; }
   .btn-top { background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 7px 16px; font-weight: 700; cursor: pointer; transition: 0.2s; }
   .btn-top:hover { filter: brightness(1.2); transform: scale(1.04); }
@@ -66,29 +67,46 @@
   #aviso.ok { border-color: #22c55e; color: #bbf7d0; }
   #aviso.aviso { border-color: #f59e0b; color: #fde68a; }
   #aviso.erro { border-color: #ef4444; color: #fecaca; }
+  /* Guia da equipe e das funções */
+  .funcao { display: grid; grid-template-columns: 34px 1fr; gap: 10px; align-items: start; }
+  .funcao .etapa { width: 30px; height: 30px; border-radius: 50%; background: #1d4ed8; color: #fff; font-weight: 800; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+  .funcao.agora { border-color: #22c55e; box-shadow: 0 0 0 1px #22c55e inset; }
+  .funcao.agora .etapa { background: #16a34a; }
+  .funcao h4 { font-size: 13px; margin-bottom: 2px; }
+  .funcao .quem { font-size: 11px; color: #fbbf24; font-weight: 700; }
+  .funcao p { font-size: 12px; color: #cbd5e1; margin-top: 4px; }
+  .funcao .status-agora { font-size: 11px; color: #86efac; margin-top: 4px; font-weight: 700; }
+  .botao-funcao { margin-top: 8px; background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 6px 12px; font-size: 11px; font-weight: 700; cursor: pointer; }
+  .guia-secao { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.6px; margin: 14px 0 8px; }
+  .guia-botoes td { padding: 6px 8px; border-bottom: 1px solid #1e293b; font-size: 12px; vertical-align: top; }
+  .guia-botoes td:first-child { white-space: nowrap; font-weight: 700; color: #e2e8f0; }
+  .tabela-virais td { padding: 5px 8px; border-bottom: 1px solid #1e293b; font-size: 12px; }
+  .tabela-virais td:last-child { text-align: right; color: #fbbf24; white-space: nowrap; }
+  #g-quem { font-size: 10px; color: #fbbf24; margin-top: 4px; font-weight: 700; }
 </style>
 </head>
 <body>
 <div id="top">
-  <div><div class="title">AGÊNCIA VIELA VICE</div><div class="sub">★ Curadoria &amp; Controle de Qualidade</div></div>
+  <div><div class="title">AGÊNCIA VIELA VICE</div><div class="sub">★ Canal dark de GTA 6 · virais da semana narrados por IA</div></div>
   <div class="metrics">
-    <div>Estoque Fila (0-60)<b style="color:#fbbf24" id="m-est">0</b></div>
-    <div>Envios de Hoje<b style="color:#34d399" id="m-env">0/42</b></div>
-    <div>Faturamento Est.<b id="m-fat">R$ 1240.0</b></div>
+    <div title="Vídeos prontos esperando a sua aprovação (limite de 9: 6 Shorts e 3 longos)">Na Diretoria<b style="color:#fbbf24" id="m-est">0</b><span>esperando você</span></div>
+    <div title="Vídeos enviados hoje: 1 longo e 2 Shorts por dia">Publicação de hoje<b style="color:#34d399" id="m-env">0/3</b><span>1 longo + 2 Shorts</span></div>
+    <div title="Números reais do canal no YouTube">Canal no YouTube<b id="m-canal">—</b><span id="m-canal-sub">inscritos</span></div>
   </div>
-  <button class="btn-top" onclick="abrirReuniao()">Reunião</button>
+  <button class="btn-top" onclick="abrirReuniao()" title="Reúne a equipe e explica a função de cada um e de cada botão">👥 Equipe e funções</button>
 </div>
 
 <div id="stage">
   <div class="box" style="top:14px; left:16px; width:245px;">
-    <div style="display:flex; justify-content:space-between; color:#facc15; font-weight:700;"><span>⚡ Estoque de Gordura (0-60)</span><span id="g-pct">0%</span></div>
+    <div style="display:flex; justify-content:space-between; color:#facc15; font-weight:700;"><span>⚙️ Produção agora</span><span id="g-pct" title="Ocupação do estoque da Diretoria">0%</span></div>
     <div id="g-msg" style="color:#cbd5e1; font-size:10px; margin-top:4px;">Conectando à produção...</div>
     <div id="g-barra"><div id="g-barra-fill"></div></div>
+    <div id="g-quem"></div>
   </div>
 
   <div class="box" style="top:104px; left:16px; width:245px;">
     <div style="display:flex; justify-content:space-between; gap:8px; font-size:10px; color:#94a3b8; border-bottom:1px solid #1e293b; padding-bottom:5px; margin-bottom:6px;">
-      <span>&gt;_ Console de Qualidade &amp; T.I.</span><span id="console-status" style="color:#94a3b8; font-weight:700; white-space:nowrap;">● CONECTANDO</span>
+      <span>&gt;_ Registro da produção</span><span id="console-status" style="color:#94a3b8; font-weight:700; white-space:nowrap;">● CONECTANDO</span>
     </div>
     <div id="logs" role="log" aria-live="polite" style="font-family:monospace; font-size:9.5px; color:#93c5fd; line-height:1.4; max-height:155px; overflow-y:auto;">
       <div>Conectando ao console da produção...</div>
@@ -97,7 +115,7 @@
   </div>
 
   <!-- Escritório virtual animado -->
-  <canvas id="cena" role="img" aria-label="Escritório da Agência Viela Vice com a equipe trabalhando"></canvas>
+  <canvas id="cena" role="img" aria-label="Escritório da Agência Viela Vice: clique em uma pessoa da equipe para ver a função dela"></canvas>
 
   <div id="camera" role="group" aria-label="Controles da visão do escritório">
     <button type="button" onclick="zoomCentral(1.25)" aria-label="Aproximar" title="Aproximar (ou role o mouse)">+</button>
@@ -106,11 +124,11 @@
   </div>
 
   <div id="dock">
-    <button class="btn" id="b-dir" onclick="abrirAvaliacao()">Diretoria<br>(0)</button>
-    <button class="btn" onclick="abrirCuradoriaTop()">Curadoria<br>Top</button>
-    <button class="btn" id="b-fila" onclick="abrirFila()">Fila YouTube<br>(0)</button>
-    <button class="btn" id="b-niv" onclick="abrirNivel()">★ Estrelas<br>0/42</button>
-    <button class="btn" onclick="abrirSuporteTI()">Suporte<br>T.I.</button>
+    <button class="btn" id="b-dir" onclick="abrirAvaliacao()" title="Assistir, aprovar ou rejeitar os vídeos prontos">Diretoria<br>(0)</button>
+    <button class="btn" id="b-fila" onclick="abrirFila()" title="Vídeos já enviados que ainda vão ao ar">Fila YouTube<br>(0)</button>
+    <button class="btn" id="b-niv" onclick="abrirNivel()" title="Quantos vídeos o canal recebeu hoje e em que horário">Publicação<br>0/3</button>
+    <button class="btn" id="b-virais" onclick="abrirVirais()" title="Os vídeos de GTA 6 mais vistos escolhidos no último ciclo">Virais<br>da vez</button>
+    <button class="btn" onclick="abrirSuporteTI()" title="Computador, IA do Google e limpeza de temporários">Suporte<br>T.I.</button>
     <button class="btn btn-red" id="b-var" aria-label="Pausar varredura" onclick="toggleVarredura()">❚❚ Pausar<br>Varredura</button>
     <button class="btn" onclick="atualizarTudo()">Atualizar</button>
   </div>

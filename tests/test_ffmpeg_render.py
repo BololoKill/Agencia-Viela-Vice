@@ -23,12 +23,12 @@ from src.pipeline.quality import auditar_video
 class TestMontagemDeFiltros(unittest.TestCase):
 
     def test_caminho_windows_tem_dois_pontos_escapado(self):
-        texto = ffmpeg_runner.escapar_caminho_filtro(Path(r"C:\Users\Barbara Bn3\sub.srt"))
-        self.assertIn(r"C\:/Users/Barbara Bn3/sub.srt", texto)
+        texto = ffmpeg_runner.escapar_caminho_filtro(Path(r"C:\Users\Dono Viela\sub.srt"))
+        self.assertIn(r"C\:/Users/Dono Viela/sub.srt", texto)
 
     def test_legenda_nao_usa_aspas_duplas(self):
         """Regressão: aspas duplas + barra dupla geravam 'Unable to open' em todo render."""
-        filtro = ffmpeg_runner.filtro_legendas(Path(r"C:\Users\Barbara Bn3\sub.srt"))
+        filtro = ffmpeg_runner.filtro_legendas(Path(r"C:\Users\Dono Viela\sub.srt"))
         self.assertTrue(filtro.startswith("subtitles=filename='"))
         self.assertNotIn('"', filtro)
 
@@ -82,7 +82,7 @@ class TestFFmpegReal(unittest.TestCase):
 
     def test_legenda_e_marca_em_caminho_hostil(self):
         """Caminho com espaço, acento, colchete, vírgula e apóstrofo."""
-        pasta = self.raiz / "Bárbara Bn3 [viela], d'água"
+        pasta = self.raiz / "Dôno Viela [viela], d'água"
         pasta.mkdir()
         clip = gerar_clipe(pasta / "clip.mp4", duracao=2)
         srt = gerar_srt(pasta / "sub.srt")
@@ -105,6 +105,12 @@ class TestFFmpegReal(unittest.TestCase):
         self.assertAlmostEqual(telas[0][1], 4.0, delta=0.5)
 
 
+def quadro_rgb(video, instante, largura, altura):
+    bruto = subprocess.run(["ffmpeg", "-v", "error", "-ss", str(instante), "-i", str(video), "-frames:v", "1",
+                            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
+    return np.frombuffer(bruto, dtype=np.uint8).reshape(altura, largura, 3).astype(float)
+
+
 class TestRenderizadorE2E(AmbienteIsolado):
 
     def setUp(self):
@@ -115,7 +121,7 @@ class TestRenderizadorE2E(AmbienteIsolado):
             patcher.start()
             self.addCleanup(patcher.stop)
         patcher = mock.patch.object(renderer, "criar_narração_intro",
-                                    side_effect=lambda _s, destino: gerar_audio(destino))
+                                    side_effect=lambda _s, destino, **_kw: gerar_audio(destino))
         patcher.start()
         self.addCleanup(patcher.stop)
         self.clip = gerar_clipe(self.raiz / "live.mp4", duracao=22)
@@ -158,6 +164,28 @@ class TestRenderizadorE2E(AmbienteIsolado):
         posicao_marca = args.index(str(MARCA_PATH))
         self.assertEqual(args[posicao_marca - 3:posicao_marca - 1], ["-loop", "1"], "a marca precisa ficar no vídeo inteiro")
         self.assertEqual(list(self.bruto_dir.iterdir()), [])
+
+    def test_marca_dagua_do_short_tem_aro_claro_do_inicio_ao_fim(self):
+        self._renderizar()
+        total = renderer.obter_duracao_audio(self.final)
+        lado = renderer.MARCA_SHORT + 2 * renderer.ARO_MARCA
+        centro_x = 1080 - 30 - lado // 2
+        topo = renderer.TOPO_GAMEPLAY + 24
+        for instante in (0.3, total / 2, total - 0.3):
+            with self.subTest(instante=instante):
+                quadro = quadro_rgb(self.final, instante, 1080, 1920)
+                self.assertGreater(quadro[topo + renderer.ARO_MARCA // 2 + 1, centro_x - 1:centro_x + 2].mean(), 200)
+
+    def test_short_usa_a_narracao_do_roteiro(self):
+        with mock.patch.object(renderer, "criar_narração_intro", side_effect=lambda _s, destino, **_kw: gerar_audio(destino)) as narrar:
+            renderer.renderizar_short(self.clip, self.segmentos, "Luqueta", self.final, gancho="A FUGA",
+                                      narracao_roteiro="Ele achou que ia escapar, mas a polícia tinha outros planos.")
+        self.assertEqual(narrar.call_args.kwargs["texto"], "Ele achou que ia escapar, mas a polícia tinha outros planos.")
+
+    def test_narracao_comprida_nao_deixa_o_short_passar_de_um_minuto(self):
+        with mock.patch.object(renderer, "criar_narração_intro", side_effect=lambda _s, destino, **_kw: gerar_audio(destino, duracao=12)),                 mock.patch.object(renderer.edicao, "calcular_trechos_uteis", wraps=renderer.edicao.calcular_trechos_uteis) as trechos:
+            self._renderizar()
+        self.assertLessEqual(trechos.call_args.kwargs["duracao_max"], renderer.DURACAO_MAXIMA_SHORT - 12)
 
     def test_narracao_final_fica_audivel_sobre_o_jogo(self):
         """Regressão: a chamada final começava atrasada e era cortada pelo fim do vídeo."""
@@ -211,6 +239,39 @@ class TestVideoLongoE2E(AmbienteIsolado):
         self.clip = gerar_clipe(self.raiz / "live.mp4", duracao=24)
         self.final = self.export_dir / "longo-luqueta-parte1-1.mp4"
 
+    def _volume_em(self, inicio, duracao, frequencia):
+        resultado = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-nostdin", "-ss", str(inicio), "-t", str(duracao), "-i", str(self.final),
+             "-af", f"bandpass=f={frequencia}:width_type=h:w=30,volumedetect", "-f", "null", "-"],
+            capture_output=True, text=True, errors="replace")
+        return float(re.search(r"mean_volume: (-?[\d.]+)", resultado.stderr).group(1))
+
+    def test_roteiro_narra_abertura_e_capitulos_com_o_jogo_mais_baixo(self):
+        falas = []
+
+        def tts(texto, destino, rate="+0%"):
+            falas.append(texto)
+            subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=880:duration=1.5", str(destino)],
+                           check=True, capture_output=True)
+            return destino
+
+        with mock.patch.object(renderer, "_gerar_tts_com_retentativa", side_effect=tts), \
+                mock.patch.object(renderer, "_codificar", wraps=renderer._codificar) as codificar:
+            renderer.renderizar_longo(self.clip, 1.0, 20.0, "Luqueta", 1, self.final, abertura="Abertura do roteiro",
+                                      narracoes=[(0.0, "Primeiro capitulo"), (7.0, "Capitulo dois"), (19.0, "Em cima da chamada final")])
+        self.assertEqual(falas[0], "Abertura do roteiro")
+        medida = ffmpeg_runner.medir_linha_do_tempo(self.final)
+        self.assertAlmostEqual(medida["audio_s"], medida["video_s"], delta=0.08)
+        self.assertEqual(medida["pacotes_amontoados"], 0)
+        silencio = self._volume_em(12.5, 1.0, 880)
+        # O primeiro capítulo espera a abertura (1,5 s) terminar e entra logo depois dela
+        self.assertGreater(self._volume_em(3.2, 0.8, 880), silencio + 15)
+        self.assertGreater(self._volume_em(7.2, 1.0, 880), silencio + 15)
+        self.assertLess(self._volume_em(19.0, 0.8, 880), silencio + 6, "narração em cima da chamada final fica de fora")
+        grafo = " ".join(codificar.call_args.args[0])
+        self.assertIn("Capitulo dois", grafo, "a fala do narrador aparece escrita na tela")
+        self.assertEqual(list(self.bruto_dir.iterdir()), [])
+
     def test_longo_sai_horizontal_sincronizado_e_sem_residuos(self):
         renderer.renderizar_longo(self.clip, 1.0, 20.0, "Davy Jones (Gameplayrj)", 1, self.final)
         saida = subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
@@ -223,6 +284,61 @@ class TestVideoLongoE2E(AmbienteIsolado):
         self.assertEqual(medida["pacotes_amontoados"], 0)
         self.assertEqual(list(self.bruto_dir.iterdir()), [])
 
+    def _live_que_muda_de_resolucao(self, trechos=(("1280x720", 12), ("1920x1080", 12))) -> Path:
+        """Simula a Twitch trocando de resolução no meio da gravação, como acontece nos comerciais."""
+        destino = self.raiz / "live_mista.ts"
+        deslocamento = 0
+        with open(destino, "wb") as saida:
+            for indice, (tamanho, duracao) in enumerate(trechos):
+                parte = self.raiz / f"parte{indice}.ts"
+                subprocess.run(
+                    ["ffmpeg", "-y", "-f", "lavfi", "-i", f"testsrc2=size={tamanho}:rate=30:duration={duracao}",
+                     "-f", "lavfi", "-i", f"sine=frequency=440:duration={duracao}", "-c:v", "libx264", "-preset", "ultrafast",
+                     "-pix_fmt", "yuv420p", "-c:a", "aac", "-output_ts_offset", str(deslocamento), "-f", "mpegts", str(parte)],
+                    check=True, capture_output=True)
+                saida.write(parte.read_bytes())
+                deslocamento += duracao
+        return destino
+
+    def test_troca_de_resolucao_na_live_nao_quebra_o_som(self):
+        """Regressão: a troca reiniciava a edição no meio e o som saía com minutos a mais."""
+        renderer.renderizar_longo(self._live_que_muda_de_resolucao(), 1.0, 20.0, "Luqueta", 1, self.final)
+        medida = ffmpeg_runner.medir_linha_do_tempo(self.final)
+        self.assertAlmostEqual(medida["video_s"], 20.0, delta=0.1)
+        self.assertAlmostEqual(medida["audio_s"], medida["video_s"], delta=0.08)
+        self.assertEqual(medida["pacotes_amontoados"], 0)
+
+    def test_comercial_da_twitch_e_localizado_pela_resolucao(self):
+        live = self._live_que_muda_de_resolucao((("1280x720", 14), ("1920x1080", 6), ("1280x720", 10)))
+        trechos = ffmpeg_runner.detectar_intervalos_comerciais(live)
+        self.assertEqual(len(trechos), 1)
+        self.assertAlmostEqual(trechos[0][0], 14.0 - ffmpeg_runner.MARGEM_COMERCIAL_S, delta=0.3)
+        self.assertAlmostEqual(trechos[0][1], 20.0 + ffmpeg_runner.MARGEM_COMERCIAL_S, delta=0.3)
+
+    def test_live_em_resolucao_unica_nao_tem_comercial(self):
+        self.assertEqual(ffmpeg_runner.detectar_intervalos_comerciais(self.clip), [])
+
+    def test_arquivo_invalido_nao_impede_a_edicao(self):
+        falso = self.raiz / "falso.mp4"
+        falso.write_bytes(b"nada")
+        self.assertEqual(ffmpeg_runner.detectar_intervalos_comerciais(falso), [])
+
+    def test_mudanca_duradoura_de_resolucao_nao_e_comercial(self):
+        quadros = "0.0,1280,720\n1000.0,1920,1080\n1500.0,1920,1080\n1990.0,1920,1080\n"
+        with mock.patch.object(ffmpeg_runner.subprocess, "check_output", return_value=quadros):
+            self.assertEqual(ffmpeg_runner.detectar_intervalos_comerciais("live.mp4"), [])
+
+    def test_marca_dagua_tem_aro_claro_do_inicio_ao_fim(self):
+        """A marca precisa aparecer sobre qualquer imagem da live, inclusive na abertura e no encerramento."""
+        renderer.renderizar_longo(self.clip, 1.0, 20.0, "Luqueta", 1, self.final)
+        lado = renderer.MARCA_LONGO + 2 * renderer.ARO_MARCA
+        centro_x = 1280 - 24 - lado // 2
+        for instante in (0.5, 10.0, 19.5):
+            with self.subTest(instante=instante):
+                quadro = quadro_rgb(self.final, instante, 1280, 720)
+                aro = quadro[24 + renderer.ARO_MARCA // 2 + 1, centro_x - 1:centro_x + 2].mean()
+                self.assertGreater(aro, 200)
+
     def test_tela_preta_e_retirada_do_longo(self):
         renderer.renderizar_longo(self.clip, 1.0, 20.0, "Luqueta", 2, self.final, bloqueios=[(8.0, 12.0)])
         self.assertAlmostEqual(ffmpeg_runner.medir_linha_do_tempo(self.final)["video_s"], 16.0, delta=0.1)
@@ -233,6 +349,95 @@ class TestVideoLongoE2E(AmbienteIsolado):
                 renderer.renderizar_longo(self.clip, 1.0, 20.0, "Luqueta", 1, self.final)
         self.assertFalse(self.final.exists())
         self.assertEqual(list(self.bruto_dir.iterdir()), [])
+
+
+class TestTopDaSemanaE2E(AmbienteIsolado):
+    """O longo junta um trecho de cada vídeo viral: cada um com a própria imagem e o próprio som, sem desalinhar."""
+
+    def setUp(self):
+        super().setUp()
+        self.cta = gerar_audio(self.raiz / "cta.mp3", duracao=3)
+        patcher = mock.patch.object(renderer, "CTA_AUDIO", self.cta)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.videos = [
+            self._video("a.mp4", "1280x720", 30, 440),
+            self._video("b.mp4", "1920x1080", 60, 660),
+            self._video("c.mp4", "854x480", 30, 990, som_s=4),  # som acaba antes da imagem
+        ]
+        self.compilacao = self.bruto_dir / "compilacao.mp4"
+
+    def _video(self, nome, tamanho, quadros, frequencia, som_s=10):
+        destino = self.raiz / nome
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", f"testsrc2=size={tamanho}:rate={quadros}:duration=10",
+             "-f", "lavfi", "-i", f"sine=frequency={frequencia}:duration={som_s}",
+             "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", str(destino)],
+            check=True, capture_output=True)
+        return destino
+
+    def _volume_em(self, video, inicio, duracao, frequencia):
+        resultado = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-nostdin", "-ss", str(inicio), "-t", str(duracao), "-i", str(video),
+             "-af", f"bandpass=f={frequencia}:width_type=h:w=30,volumedetect", "-f", "null", "-"],
+            capture_output=True, text=True, errors="replace")
+        return float(re.search(r"mean_volume: (-?[\d.]+)", resultado.stderr).group(1))
+
+    def _montar(self):
+        trechos = [(self.videos[0], 2.0, 6.0), (self.videos[1], 1.0, 5.5), (self.videos[2], 3.0, 7.0)]
+        return renderer.montar_compilacao(trechos, self.compilacao)
+
+    def test_trechos_entram_em_ordem_e_em_quadros_inteiros(self):
+        inicios, total = self._montar()
+        self.assertEqual(inicios, [0.0, 4.0, 8.5])
+        self.assertAlmostEqual(total, 12.5, places=3)
+        medida = ffmpeg_runner.medir_linha_do_tempo(self.compilacao)
+        self.assertAlmostEqual(medida["video_s"], 12.5, delta=0.05)
+        self.assertAlmostEqual(medida["audio_s"], medida["video_s"], delta=0.08)
+        self.assertEqual(medida["pacotes_amontoados"], 0)
+        saida = subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                                         "stream=width,height,r_frame_rate", "-of", "json", str(self.compilacao)])
+        stream = json.loads(saida)["streams"][0]
+        self.assertEqual((stream["width"], stream["height"], stream["r_frame_rate"]), (1280, 720, "30/1"))
+
+    def test_cada_trecho_leva_o_proprio_som(self):
+        self._montar()
+        self.assertGreater(self._volume_em(self.compilacao, 1.0, 1.5, 440), self._volume_em(self.compilacao, 1.0, 1.5, 660) + 15)
+        self.assertGreater(self._volume_em(self.compilacao, 5.5, 1.5, 660), self._volume_em(self.compilacao, 5.5, 1.5, 440) + 15)
+
+    def test_som_que_acaba_antes_da_imagem_vira_silencio_sem_desalinhar(self):
+        inicios, total = self._montar()
+        self.assertGreater(self._volume_em(self.compilacao, 8.6, 0.8, 990), -45, "o começo do trecho tem o som dele")
+        self.assertLess(self._volume_em(self.compilacao, 10.5, 1.5, 990), -60, "depois que o som acaba fica silêncio")
+        self.assertAlmostEqual(ffmpeg_runner.medir_linha_do_tempo(self.compilacao)["video_s"], total, delta=0.05)
+
+    def test_top_mostra_titulo_e_o_nome_de_cada_criador(self):
+        inicios, total = self._montar()
+        final = self.export_dir / "longo-top3-semana-1.mp4"
+
+        def tts(texto, destino, rate="+0%"):
+            subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "sine=frequency=880:duration=1", str(destino)],
+                           check=True, capture_output=True)
+            return destino
+
+        fins = inicios[1:] + [total]
+        creditos = [(ini, fim, nome) for ini, fim, nome in zip(inicios, fins, ("Criador A", "Criador B", "Criador C"))]
+        with mock.patch.object(renderer, "_gerar_tts_com_retentativa", side_effect=tts), \
+                mock.patch.object(renderer, "_codificar", wraps=renderer._codificar) as codificar:
+            renderer.renderizar_longo(self.compilacao, 0.0, total, "GTA 6", 1, final, abertura="Top da semana",
+                                      narracoes=list(zip(inicios, ("Terceiro lugar", "Segundo lugar", "Primeiro lugar"))),
+                                      titulo_tela="TOP 3 DA SEMANA", subtitulo_tela="OS MAIS VIRAIS DE GTA 6", creditos=creditos)
+        grafo = " ".join(codificar.call_args.args[0])
+        for texto in ("TOP 3 DA SEMANA", "OS MAIS VIRAIS DE GTA 6", "VÍDEO DE CRIADOR A", "VÍDEO DE CRIADOR C"):
+            self.assertIn(texto, grafo)
+        medida = ffmpeg_runner.medir_linha_do_tempo(final)
+        self.assertAlmostEqual(medida["video_s"], total, delta=0.1)
+        self.assertAlmostEqual(medida["audio_s"], medida["video_s"], delta=0.08)
+
+    def test_sem_trechos_nao_monta_nada(self):
+        with self.assertRaises(FFmpegError):
+            renderer.montar_compilacao([], self.compilacao)
+        self.assertFalse(self.compilacao.exists())
 
 
 class TestCodificadorDoVideoFinal(AmbienteIsolado):
@@ -259,6 +464,25 @@ class TestCodificadorDoVideoFinal(AmbienteIsolado):
         self.assertIn("h264_qsv", chamadas[0])
         self.assertIn("libx264", chamadas[1])
 
+    def _tempos_limite(self, disponivel, efeito=None, quadros=15300):
+        with mock.patch.object(renderer, "quick_sync_disponivel", return_value=disponivel),                 mock.patch.object(renderer, "executar_ffmpeg", side_effect=efeito) as ffmpeg:
+            renderer._renderizar_final(Path("intro.mp4"), Path("conteudo.mp4"), quadros, Path("final.mp4"))
+        return [c.kwargs.get("timeout") for c in ffmpeg.call_args_list]
+
+    def test_placa_intel_travada_e_percebida_cedo(self):
+        """Regressão: a placa travou 36 min num longo de 8min30 antes de o sistema desistir dela."""
+        limites = self._tempos_limite(True, efeito=[FFmpegError("final", "timeout", "travou"), None])
+        self.assertLessEqual(limites[0], 900)
+
+    def test_processador_tem_tempo_para_terminar_um_longo(self):
+        """Regressão: refazer no processador estourava os 30 min e o vídeo longo era perdido."""
+        limites = self._tempos_limite(True, efeito=[FFmpegError("final", "timeout", "travou"), None])
+        self.assertGreaterEqual(limites[1], 510 * 6)
+
+    def test_short_continua_com_tempo_minimo_de_folga(self):
+        limites = self._tempos_limite(False, quadros=1800)
+        self.assertGreaterEqual(limites[0], 600)
+
     def test_falha_no_processador_nao_e_repetida(self):
         with self.assertRaises(FFmpegError):
             self._renderizar_final(False, efeito=FFmpegError("final", 1, "erro real"))
@@ -277,7 +501,7 @@ class TestSincroniaDeFalaEImagem(AmbienteIsolado):
             patcher.start()
             self.addCleanup(patcher.stop)
         patcher = mock.patch.object(renderer, "criar_narração_intro",
-                                    side_effect=lambda _s, destino: gerar_audio(destino))
+                                    side_effect=lambda _s, destino, **_kw: gerar_audio(destino))
         patcher.start()
         self.addCleanup(patcher.stop)
 

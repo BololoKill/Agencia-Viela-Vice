@@ -27,14 +27,25 @@ ALTURA_GAMEPLAY = 810
 TOPO_GAMEPLAY = (1920 - ALTURA_GAMEPLAY) // 2
 DURACAO_MINIMA_CTA = 4.0
 DURACAO_MINIMA_CONTEUDO = 10.0
+VELOCIDADE_ROTEIRO = "+12%"
+DURACAO_MAXIMA_SHORT = 59.5  # Short completo sempre abaixo de 1 minuto, mesmo com narração longa
+VOLUME_JOGO_NA_NARRACAO = 0.18  # O jogo abaixa, sem sumir, enquanto o narrador fala
+ATRASO_MAXIMO_NARRACAO_S = 20.0  # Uma narração pode esperar a anterior terminar, mas não sair do próprio capítulo
 TAXA_AUDIO = 44100
 FORMATO_AUDIO = f"aformat=sample_fmts=fltp:sample_rates={TAXA_AUDIO}:channel_layouts=stereo"
 NORMALIZAR_VOZ = f"loudnorm=I=-14:TP=-1.5:LRA=11,aresample={TAXA_AUDIO},aformat=channel_layouts=stereo"
 FADE_CORTE_S = 0.006
 QUALIDADE_QUICK_SYNC = "12"
+FOLGA_PLACA = 1.5  # A placa Intel monta 8min30 em uns 5 min: passar de 1,5x a duração é travamento
+FOLGA_PROCESSADOR = 6.0
 LARGURA_LONGO = 1280
 ALTURA_LONGO = 720
-MARCA_LONGO = 96
+MARCA_LONGO = 104
+MARCA_SHORT = 140
+ARO_MARCA = 6  # Aro claro com contorno escuro: a marca aparece sobre qualquer imagem da live
+# A Twitch muda de resolução no meio da live. Sem isto o FFmpeg reinicia a edição e perde a contagem de quadros.
+ENTRADA_ESTAVEL = ["-reinit_filter:v", "0"]
+IMAGEM_ESTAVEL = "scale=-2:720:flags=lanczos"
 
 
 async def gerar_audio_tts(texto: str, output_path: Path, voz: str = "pt-BR-AntonioNeural", rate: str = "+0%"):
@@ -56,9 +67,11 @@ def _gerar_tts_com_retentativa(texto: str, destino: Path, rate: str = "+0%") -> 
     raise ConnectionError(f"Narração indisponível no edge-tts: {ultimo_erro}")
 
 
-def criar_narração_intro(streamer: str, output_audio: Path) -> Path:
-    """Cria introdução narrada curta para o corte."""
-    texto = f"Olha o que rolou na live de {edicao.nome_falado(streamer)}!"
+def criar_narração_intro(streamer: str, output_audio: Path, texto: str = None) -> Path:
+    """Cria a narração de abertura: a do roteiro do canal ou, sem roteiro, a frase padrão."""
+    if texto:
+        return _gerar_tts_com_retentativa(texto, output_audio, rate=VELOCIDADE_ROTEIRO)
+    texto = f"Olha o que rolou no GTA 6 com {edicao.nome_falado(streamer)}!"
     return _gerar_tts_com_retentativa(texto, output_audio, rate="+20%")
 
 
@@ -132,6 +145,21 @@ def _filtro_layout(zoom: str) -> str:
     )
 
 
+def _filtro_marca(entrada: str, lado: int, rotulo: str) -> str:
+    """Logo redondo do canal com aro branco e contorno escuro, para ficar visível em cena clara ou escura."""
+    total = lado + 2 * ARO_MARCA
+    meio = total / 2
+    distancia = f"hypot(X-{meio},Y-{meio})"
+
+    def canal(cor):
+        return f"if(gt({distancia},{lado / 2}),if(gt({distancia},{meio - 2}),25,250),{cor}(X,Y))"
+
+    return (
+        f"{entrada}scale={lado}:{lado},format=rgba,pad={total}:{total}:{ARO_MARCA}:{ARO_MARCA}:color=white,"
+        f"geq=r='{canal('r')}':g='{canal('g')}':b='{canal('b')}':a='255*lte({distancia},{meio})'[{rotulo}]"
+    )
+
+
 def _filtros_titulo(gancho: str, limite: float = None) -> list:
     quando = f":enable='lt(t,{limite:.2f})'" if limite is not None else ""
     return [
@@ -171,9 +199,9 @@ def _renderizar_conteudo(video_original: Path, base: float, duracao_fonte: float
     fps = VIDEO_SPECS["fps"]
     filtros = ",".join([*_filtros_titulo(gancho, limite), filtro_legendas(legenda)])
     executar_ffmpeg([
-        "-ss", f"{base:.3f}", "-t", f"{duracao_fonte:.3f}", "-i", str(video_original),
+        *ENTRADA_ESTAVEL, "-ss", f"{base:.3f}", "-t", f"{duracao_fonte:.3f}", "-i", str(video_original),
         "-filter_complex", (
-            f"[0:v]fps={fps}:start_time=0,select='{_expressao_quadros(quadros)}',setpts=N/{fps}/TB,split=2[b0][f0];"
+            f"[0:v]{IMAGEM_ESTAVEL},fps={fps}:start_time=0,select='{_expressao_quadros(quadros)}',setpts=N/{fps}/TB,split=2[b0][f0];"
             f"{_filtro_layout(_expressao_zoom(quadros))},{filtros}[v];"
             f"{_filtro_audio_cortes(quadros)}"
         ),
@@ -201,10 +229,10 @@ def _renderizar_intro(video_original: Path, inicio_imagem, quadro: Path, narraca
             f"d={quadros}:s=1080x1920:fps={fps},eq=brightness=-0.08,setsar=1,{etiqueta},format=yuv420p[v];"
         )
     else:
-        entradas = ["-ss", f"{inicio_imagem:.3f}", "-t", f"{duracao + 0.5:.3f}", "-i", str(video_original)]
+        entradas = [*ENTRADA_ESTAVEL, "-ss", f"{inicio_imagem:.3f}", "-t", f"{duracao + 0.5:.3f}", "-i", str(video_original)]
         textos = ",".join([*_filtros_titulo(gancho), etiqueta])
         imagem = (
-            f"[0:v]fps={fps}:start_time=0,trim=end_frame={quadros},setpts=N/{fps}/TB,split=2[b0][f0];"
+            f"[0:v]{IMAGEM_ESTAVEL},fps={fps}:start_time=0,trim=end_frame={quadros},setpts=N/{fps}/TB,split=2[b0][f0];"
             f"{_filtro_layout('min(1+0.0012*on,1.1)')},{textos}[v];"
         )
     entradas += ["-i", str(narracao)]
@@ -235,16 +263,23 @@ def _codificador_final(acelerado: bool) -> list:
     return ["-c:v", VIDEO_SPECS["codec_v"], "-pix_fmt", VIDEO_SPECS["pix_fmt"], "-preset", PRESET_FINAL, "-crf", CRF_FINAL]
 
 
-def _codificar(entrada_e_filtros: list, saida_final: list, etapa: str):
-    """Usa a placa Intel quando possível e refaz no processador se ela falhar."""
+def _codificar(entrada_e_filtros: list, saida_final: list, etapa: str, duracao_s: float = 60.0):
+    """
+    Usa a placa Intel quando possível e refaz no processador se ela falhar.
+    O tempo limite acompanha a duração do vídeo: a placa travada é percebida cedo e o processador,
+    bem mais lento, ganha tempo para terminar um vídeo longo.
+    """
     acelerado = quick_sync_disponivel()
+    limite_placa = int(max(600, duracao_s * FOLGA_PLACA))
+    limite_processador = int(max(1800, duracao_s * FOLGA_PROCESSADOR))
     try:
-        executar_ffmpeg([*entrada_e_filtros, *_codificador_final(acelerado), *saida_final], etapa=etapa)
+        executar_ffmpeg([*entrada_e_filtros, *_codificador_final(acelerado), *saida_final], etapa=etapa,
+                        timeout=limite_placa if acelerado else limite_processador)
     except FFmpegError as erro:
         if not acelerado:
             raise
         log_terminal(f"[EDITOR] Placa Intel falhou, refazendo no processador: {erro.detalhe}")
-        executar_ffmpeg([*entrada_e_filtros, *_codificador_final(False), *saida_final], etapa=etapa)
+        executar_ffmpeg([*entrada_e_filtros, *_codificador_final(False), *saida_final], etapa=etapa, timeout=limite_processador)
 
 
 def _renderizar_final(intro: Path, conteudo: Path, quadros_total: int, saida: Path):
@@ -257,7 +292,7 @@ def _renderizar_final(intro: Path, conteudo: Path, quadros_total: int, saida: Pa
     y_marca = TOPO_GAMEPLAY + 24
     arroba = filtro_texto(
         "@VielaVice",
-        f"fontcolor=white:fontsize=30:borderw=3:bordercolor=black:x=w-text_w-28:y={y_marca + 134}",
+        f"fontcolor=white:fontsize=34:borderw=4:bordercolor=black:x=w-text_w-26:y={y_marca + MARCA_SHORT + 2 * ARO_MARCA + 6}",
         fonte=FONTE_TITULO,
     )
     faixas = ",".join(
@@ -276,8 +311,7 @@ def _renderizar_final(intro: Path, conteudo: Path, quadros_total: int, saida: Pa
         "-loop", "1", "-i", str(MARCA_PATH),
         "-filter_complex", (
             "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[video][audio];"
-            "[3:v]scale=128:128,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
-            "a='255*lte(hypot(X-W/2,Y-H/2),W/2)'[logo];"
+            f"{_filtro_marca('[3:v]', MARCA_SHORT, 'logo')};"
             f"[video][logo]overlay=x=W-w-30:y={y_marca}:format=auto:shortest=1,{arroba},{faixas},format=yuv420p[v];"
             f"[audio]volume=volume=0.10:enable='gte(t,{inicio_cta:.3f})',{FORMATO_AUDIO}[jogo];"
             f"[2:a]aresample={TAXA_AUDIO},{FORMATO_AUDIO},volume=6dB,adelay={_amostras(quadro_cta)}S:all=1[voz_cta];"
@@ -288,7 +322,7 @@ def _renderizar_final(intro: Path, conteudo: Path, quadros_total: int, saida: Pa
         "-r", str(fps),
     ]
     saida_final = ["-c:a", VIDEO_SPECS["codec_a"], "-b:a", VIDEO_SPECS["bitrate_a"], "-movflags", "+faststart", str(saida), "-y"]
-    _codificar(entrada_e_filtros, saida_final, etapa="final")
+    _codificar(entrada_e_filtros, saida_final, etapa="final", duracao_s=quadros_total / fps)
 
 
 def _inicio_da_abertura(trechos: list, duracao: float, bloqueios) -> float:
@@ -301,19 +335,86 @@ def _inicio_da_abertura(trechos: list, duracao: float, bloqueios) -> float:
 
 def criar_narracao_longo(streamer: str, parte: int, output_audio: Path) -> Path:
     """Cria a abertura narrada do vídeo longo."""
-    texto = f"Os melhores momentos da live de {edicao.nome_falado(streamer)}, parte {parte}!"
+    texto = f"Os melhores momentos de {edicao.nome_falado(streamer)} no GTA 6, parte {parte}!"
     return _gerar_tts_com_retentativa(texto, output_audio, rate="+10%")
 
 
-def _textos_do_longo(streamer: str, parte: int, fim_intro: float, inicio_cta: float) -> str:
-    y_marca = 24 + MARCA_LONGO + 6
+def _legendas_da_narracao(capitulos: list) -> list:
+    """A fala do narrador aparece escrita na tela: boa parte do público assiste sem som."""
+    filtros = []
+    for ini, fim, _, texto in capitulos:
+        linhas = edicao.quebrar_linhas(texto, max_chars=46, max_linhas=4)
+        topo = 690 - 44 * len(linhas)
+        for posicao, linha in enumerate(linhas):
+            filtros.append(filtro_texto(
+                linha,
+                f"fontcolor=white:fontsize=30:box=1:boxcolor=black@0.72:boxborderw=10:x=(w-text_w)/2:"
+                f"y={topo + 44 * posicao}:enable='between(t,{ini:.3f},{fim:.3f})'",
+                fonte=FONTE_TITULO,
+            ))
+    return filtros
+
+
+def _creditos_na_tela(creditos) -> list:
+    """O nome do criador de cada trecho fica no canto da tela enquanto o trecho passa."""
+    return [
+        filtro_texto(
+            f"VÍDEO DE {edicao.nome_falado(nome).upper()}",
+            f"fontcolor=white:fontsize=26:box=1:boxcolor=black@0.65:boxborderw=10:x=24:y=24:"
+            f"enable='between(t,{ini:.3f},{fim:.3f})'",
+            fonte=FONTE_TITULO,
+        )
+        for ini, fim, nome in creditos
+    ]
+
+
+def _textos_do_longo(streamer: str, parte: int, fim_intro: float, inicio_cta: float, legendas=(),
+                     titulo_tela: str = None, subtitulo_tela: str = None, creditos=()) -> str:
+    y_marca = 24 + MARCA_LONGO + 2 * ARO_MARCA + 6
+    titulo_tela = titulo_tela or "MELHORES MOMENTOS"
+    subtitulo_tela = subtitulo_tela or f"{edicao.nome_falado(streamer).upper()} - PARTE {parte}"
     textos = [
-        filtro_texto("@VielaVice", f"fontcolor=white:fontsize=22:borderw=2:bordercolor=black:x=w-text_w-20:y={y_marca}", fonte=FONTE_TITULO),
-        filtro_texto("MELHORES MOMENTOS", f"fontcolor=white:fontsize=64:box=1:boxcolor=black@0.78:boxborderw=18:x=(w-text_w)/2:y=250:enable='lt(t,{fim_intro:.3f})'", fonte=FONTE_TITULO),
-        filtro_texto(f"{edicao.nome_falado(streamer).upper()} - PARTE {parte}", f"fontcolor=black:fontsize=42:box=1:boxcolor=0xFACC15:boxborderw=14:x=(w-text_w)/2:y=370:enable='lt(t,{fim_intro:.3f})'", fonte=FONTE_TITULO),
+        filtro_texto("@VielaVice", f"fontcolor=white:fontsize=26:borderw=3:bordercolor=black:x=w-text_w-20:y={y_marca}", fonte=FONTE_TITULO),
+        filtro_texto(titulo_tela, f"fontcolor=white:fontsize=64:box=1:boxcolor=black@0.78:boxborderw=18:x=(w-text_w)/2:y=250:enable='lt(t,{fim_intro:.3f})'", fonte=FONTE_TITULO),
+        filtro_texto(subtitulo_tela, f"fontcolor=black:fontsize=42:box=1:boxcolor=0xFACC15:boxborderw=14:x=(w-text_w)/2:y=370:enable='lt(t,{fim_intro:.3f})'", fonte=FONTE_TITULO),
         filtro_texto("CURTA E SE INSCREVA NO VIELA VICE!", f"fontcolor=white:fontsize=44:box=1:boxcolor=0xDC2626:boxborderw=16:x=(w-text_w)/2:y=600:enable='gte(t,{inicio_cta:.3f})'", fonte=FONTE_TITULO),
     ]
+    textos.extend(_creditos_na_tela(creditos))
+    textos.extend(legendas)
     return ",".join(textos)
+
+
+def montar_compilacao(trechos: list, saida: Path) -> tuple:
+    """
+    Junta, na ordem, um trecho de cada vídeo viral num só arquivo 1280x720 a 30 quadros.
+    Imagem e som de cada trecho são cortados juntos, em quadros inteiros, para a fala não sair da boca.
+    "trechos" traz (arquivo, início, fim). Devolve (instante em que cada trecho começa, duração total).
+    """
+    if not trechos:
+        raise FFmpegError("compilacao", "sem_trechos", "nenhum trecho para montar o vídeo longo.")
+    fps = VIDEO_SPECS["fps"]
+    entradas, filtros, pares, inicios = [], [], [], []
+    posicao = 0
+    for i, (arquivo, ini, fim) in enumerate(trechos):
+        quadros = max(1, int(round((fim - ini) * fps)))
+        amostras = _amostras(quadros)
+        entradas += [*ENTRADA_ESTAVEL, "-ss", f"{ini:.3f}", "-t", f"{quadros / fps + 0.5:.3f}", "-i", str(arquivo)]
+        filtros.append(
+            f"[{i}:v]{IMAGEM_ESTAVEL},fps={fps}:start_time=0,trim=end_frame={quadros},setpts=N/{fps}/TB,"
+            f"scale={LARGURA_LONGO}:{ALTURA_LONGO}:force_original_aspect_ratio=decrease,"
+            f"pad={LARGURA_LONGO}:{ALTURA_LONGO}:(ow-iw)/2:(oh-ih)/2,setsar=1[v{i}];"
+            f"[{i}:a]asetpts=PTS-STARTPTS,aresample={TAXA_AUDIO},{FORMATO_AUDIO},"
+            f"apad=whole_len={amostras},atrim=end_sample={amostras}[a{i}];"
+        )
+        pares.append(f"[v{i}][a{i}]")
+        inicios.append(round(posicao / fps, 3))
+        posicao += quadros
+    filtro = "".join(filtros) + f"{''.join(pares)}concat=n={len(trechos)}:v=1:a=1[v][a]"
+    executar_ffmpeg([
+        *entradas, "-filter_complex", filtro, "-map", "[v]", "-map", "[a]", "-frames:v", str(posicao),
+        *_saida_intermediaria(), str(saida), "-y"
+    ], etapa="compilacao", timeout=int(max(900, posicao / fps * FOLGA_PROCESSADOR)))
+    return inicios, round(posicao / fps, 3)
 
 
 def renderizar_longo(
@@ -323,11 +424,18 @@ def renderizar_longo(
     streamer: str,
     parte: int,
     output_final: Path,
-    bloqueios=()
+    bloqueios=(),
+    abertura: str = None,
+    narracoes=(),
+    titulo_tela: str = None,
+    subtitulo_tela: str = None,
+    creditos=()
 ) -> Path:
     """
     Produz um vídeo longo horizontal, em uma única passada para manter fala e imagem juntas.
-    A abertura é narrada com o som do jogo mudo e o final traz a chamada para o canal.
+    A abertura é narrada com o som do jogo mudo; cada capítulo do roteiro ganha uma narração
+    com o jogo mais baixo; o final traz a chamada para o canal.
+    "creditos" traz (início, fim, criador) para o nome de quem fez cada trecho aparecer na tela.
     """
     garantir_audio_cta()
     fps = VIDEO_SPECS["fps"]
@@ -336,6 +444,7 @@ def renderizar_longo(
     ts = int(time.time() * 1000)
     narracao = temp_dir / f"longo_intro_{ts}.mp3"
     final_tmp = temp_dir / f"longo_{ts}.mp4"
+    arquivos_capitulos = []
 
     try:
         trechos = edicao.alinhar_trechos_aos_quadros(edicao.trechos_sem_bloqueios(inicio, duracao, bloqueios), fps)
@@ -346,44 +455,75 @@ def renderizar_longo(
         quadros_total = sum(fim - ini for ini, fim in quadros)
         total_amostras = _amostras(quadros_total)
 
-        criar_narracao_longo(streamer, parte, narracao)
+        if abertura:
+            _gerar_tts_com_retentativa(abertura, narracao, rate=VELOCIDADE_ROTEIRO)
+        else:
+            criar_narracao_longo(streamer, parte, narracao)
         fim_intro = math.ceil((obter_duracao_audio(narracao) + 0.25) * fps) / fps
         duracao_cta = max(DURACAO_MINIMA_CTA, obter_duracao_audio(CTA_AUDIO) + 0.3)
         quadro_cta = max(fps, quadros_total - int(math.ceil(duracao_cta * fps)))
         inicio_cta = quadro_cta / fps
 
+        capitulos = []
+        livre_a_partir = fim_intro + 1.0
+        for indice, (instante, texto) in enumerate(sorted(narracoes)):
+            inicio_fala = max(instante, livre_a_partir)
+            if not texto or inicio_fala - instante > ATRASO_MAXIMO_NARRACAO_S:
+                continue
+            arquivo = temp_dir / f"longo_cap_{ts}_{indice}.mp3"
+            arquivos_capitulos.append(arquivo)
+            _gerar_tts_com_retentativa(texto, arquivo, rate=VELOCIDADE_ROTEIRO)
+            inicio_fala = round(inicio_fala * fps) / fps
+            fim = inicio_fala + obter_duracao_audio(arquivo) + 0.3
+            if fim >= inicio_cta - 1.0:
+                continue
+            capitulos.append((inicio_fala, fim, arquivo, texto))
+            livre_a_partir = fim + 1.0
+        abaixar = "".join(
+            f"volume=volume={VOLUME_JOGO_NA_NARRACAO}:enable='between(t,{ini:.3f},{fim:.3f})',"
+            for ini, fim, _, _ in capitulos
+        )
+        entradas_capitulos = [item for _, _, arquivo, _ in capitulos for item in ("-i", str(arquivo))]
+        vozes_capitulos = "".join(
+            f"[{4 + i}:a]{NORMALIZAR_VOZ},{FORMATO_AUDIO},adelay={_amostras(int(round(ini * fps)))}S:all=1[cap{i}];"
+            for i, (ini, _, _, _) in enumerate(capitulos)
+        )
+        rotulos_capitulos = "".join(f"[cap{i}]" for i in range(len(capitulos)))
+
         entrada_e_filtros = [
-            "-ss", f"{base:.3f}", "-t", f"{quadros[-1][1] / fps + 0.5:.3f}", "-i", str(video_original),
+            *ENTRADA_ESTAVEL, "-ss", f"{base:.3f}", "-t", f"{quadros[-1][1] / fps + 0.5:.3f}", "-i", str(video_original),
             "-i", str(narracao),
             "-i", str(CTA_AUDIO),
             "-loop", "1", "-i", str(MARCA_PATH),
+            *entradas_capitulos,
             "-filter_complex", (
-                f"[0:v]fps={fps}:start_time=0,select='{_expressao_quadros(quadros)}',setpts=N/{fps}/TB,"
+                f"[0:v]{IMAGEM_ESTAVEL},fps={fps}:start_time=0,select='{_expressao_quadros(quadros)}',setpts=N/{fps}/TB,"
                 f"scale={LARGURA_LONGO}:{ALTURA_LONGO}:force_original_aspect_ratio=decrease,"
                 f"pad={LARGURA_LONGO}:{ALTURA_LONGO}:(ow-iw)/2:(oh-ih)/2,setsar=1,eq=contrast=1.06:saturation=1.15[base];"
-                f"[3:v]scale={MARCA_LONGO}:{MARCA_LONGO},format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
-                "a='255*lte(hypot(X-W/2,Y-H/2),W/2)'[logo];"
+                f"{_filtro_marca('[3:v]', MARCA_LONGO, 'logo')};"
                 f"[base][logo]overlay=x=W-w-24:y=24:format=auto:shortest=1,"
-                f"{_textos_do_longo(streamer, parte, fim_intro, inicio_cta)},format=yuv420p[v];"
+                f"{_textos_do_longo(streamer, parte, fim_intro, inicio_cta, _legendas_da_narracao(capitulos), titulo_tela, subtitulo_tela, creditos)},format=yuv420p[v];"
                 f"{_filtro_audio_cortes(quadros, rotulo='original')};"
-                f"[original]volume=volume=0:enable='lt(t,{fim_intro:.3f})',"
+                f"[original]volume=volume=0:enable='lt(t,{fim_intro:.3f})',{abaixar}"
                 f"volume=volume=0.10:enable='gte(t,{inicio_cta:.3f})',{FORMATO_AUDIO}[jogo];"
                 f"[1:a]{NORMALIZAR_VOZ},{FORMATO_AUDIO}[voz];"
+                f"{vozes_capitulos}"
                 f"[2:a]aresample={TAXA_AUDIO},{FORMATO_AUDIO},volume=6dB,adelay={_amostras(quadro_cta)}S:all=1[voz_cta];"
-                "[jogo][voz][voz_cta]amix=inputs=3:duration=first:normalize=0,alimiter=limit=0.9:latency=1,"
+                f"[jogo][voz]{rotulos_capitulos}[voz_cta]amix=inputs={3 + len(capitulos)}:duration=first:normalize=0,"
+                "alimiter=limit=0.9:latency=1,"
                 f"apad=whole_len={total_amostras},atrim=end_sample={total_amostras}[a]"
             ),
             "-map", "[v]", "-map", "[a]", "-frames:v", str(quadros_total),
             "-r", str(fps),
         ]
         saida = ["-c:a", VIDEO_SPECS["codec_a"], "-b:a", VIDEO_SPECS["bitrate_a"], "-movflags", "+faststart", str(final_tmp), "-y"]
-        _codificar(entrada_e_filtros, saida, etapa="longo")
+        _codificar(entrada_e_filtros, saida, etapa="longo", duracao_s=quadros_total / fps)
         garantir_sincronia(final_tmp)
         output_final.parent.mkdir(parents=True, exist_ok=True)
         os.replace(final_tmp, output_final)
         return output_final
     finally:
-        for arquivo in (narracao, final_tmp):
+        for arquivo in (narracao, final_tmp, *arquivos_capitulos):
             try:
                 arquivo.unlink(missing_ok=True)
             except OSError:
@@ -396,7 +536,8 @@ def renderizar_short(
     streamer: str,
     output_final: Path,
     gancho: str = None,
-    bloqueios=()
+    bloqueios=(),
+    narracao_roteiro: str = None
 ) -> Path:
     """
     Produz o Short completo em 1080x1920:
@@ -424,8 +565,11 @@ def renderizar_short(
     try:
         palavras = edicao.palavras_dos_segmentos(segmentos)
         fps = VIDEO_SPECS["fps"]
+        criar_narração_intro(streamer, narracao, texto=narracao_roteiro)
+        quadros_intro = int(math.ceil((obter_duracao_audio(narracao) + 0.25) * fps))
+        maximo_conteudo = min(VIDEO_SPECS["duracao_conteudo_s"], DURACAO_MAXIMA_SHORT - quadros_intro / fps)
         trechos = edicao.alinhar_trechos_aos_quadros(edicao.calcular_trechos_uteis(
-            palavras, bloqueios=bloqueios, duracao_max=VIDEO_SPECS["duracao_conteudo_s"]), fps)
+            palavras, bloqueios=bloqueios, duracao_max=maximo_conteudo), fps)
         duracao_conteudo = edicao.duracao_trechos(trechos)
         if duracao_conteudo < DURACAO_MINIMA_CONTEUDO:
             raise FFmpegError("edicao", "sem_fala", "trecho sem fala suficiente para um Short.")
@@ -434,8 +578,6 @@ def renderizar_short(
         quadros = _quadros_dos_trechos(trechos, base)
         duracao_fonte = quadros[-1][1] / fps + 0.5
 
-        criar_narração_intro(streamer, narracao)
-        quadros_intro = int(math.ceil((obter_duracao_audio(narracao) + 0.25) * fps))
         duracao_cta = max(DURACAO_MINIMA_CTA, obter_duracao_audio(CTA_AUDIO) + 0.3)
         limite = max(1.0, duracao_conteudo - duracao_cta)
 
